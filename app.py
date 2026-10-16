@@ -21,18 +21,19 @@ import httpx
 
 # Securely configure system root CA certificates for SSL verification so Supabase
 # and external requests connect reliably with full TLS validation on Windows.
-try:
-    _ssl_ctx = ssl.create_default_context()
-    _ssl_ctx.load_default_certs()
-    ssl._create_default_https_context = lambda: _ssl_ctx
-    _orig_httpx_init = httpx.Client.__init__
-    def _safe_httpx_init(self, *args, **kwargs):
-        if kwargs.get("verify") is True or "verify" not in kwargs:
-            kwargs["verify"] = _ssl_ctx
-        _orig_httpx_init(self, *args, **kwargs)
-    httpx.Client.__init__ = _safe_httpx_init
-except Exception:
-    pass
+if os.name == "nt":
+    try:
+        _ssl_ctx = ssl.create_default_context()
+        _ssl_ctx.load_default_certs()
+        ssl._create_default_https_context = lambda: _ssl_ctx
+        _orig_httpx_init = httpx.Client.__init__
+        def _safe_httpx_init(self, *args, **kwargs):
+            if kwargs.get("verify") is True or "verify" not in kwargs:
+                kwargs["verify"] = _ssl_ctx
+            _orig_httpx_init(self, *args, **kwargs)
+        httpx.Client.__init__ = _safe_httpx_init
+    except Exception:
+        pass
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -309,7 +310,11 @@ def get_sb():
         )
         st.stop()
     cfg = st.secrets["supabase"]
-    return create_client(cfg["url"], cfg["anon_key"])
+    try:
+        return create_client(cfg["url"], cfg["anon_key"])
+    except Exception as e:
+        st.error(f"⚠️ **Supabase Client Initialization Error:** {e}")
+        st.stop()
 
 
 sb = get_sb()
