@@ -1,0 +1,28 @@
+# Python bytecode & environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Test, linting & tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit secrets (NEVER commit live secrets to git)
+.streamlit/secrets.toml
+
+# Generated invoices & exports (preserve directory with .gitkeep)
+invoices/**/*.html
+invoices/*.html
+!invoices/.gitkeep
+*.zip
+*.xlsx
+
+# Operating System & IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

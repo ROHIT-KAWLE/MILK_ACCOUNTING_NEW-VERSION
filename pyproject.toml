@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # Module level import not at top of file (used for sys.path configuration in tests)
+    "E712",  # Comparison to True (standard pandas boolean indexing)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

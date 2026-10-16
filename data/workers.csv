@@ -1,0 +1,5 @@
+worker_id,name,role,contact,salary_type,base_rate,is_active
+1,Ramesh Yadav,Driver,9820000001.0,Daily,1000.0,True
+2,Suresh Gawali,Helper,9820000002.0,Daily,400.0,True
+3,Santosh Patil,Dairy Staff,9820000003.0,Monthly,15000.0,True
+4,DANGE,Driver,,Daily,500.0,True

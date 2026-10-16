@@ -1,0 +1,2 @@
+invoice_no,retailer_id,retailer_name,start_date,end_date,total_milk_amount,opening_balance,payment_received,total_payable,saved_at,file_path
+CCM/202610-0114/R001,1,Gupta dairy (gulmohar road Juhu),2026-10-01,2026-10-14,150268.0,275032.0,0.0,425300.0,2026-10-14 13:26:46,C:\Users\yogit\.gemini\antigravity\scratch\milk_account-main\invoices\bill_Gupta_dairy_(gulmohar_road_Juhu)_2026-10-01_to_2026-10-14.html

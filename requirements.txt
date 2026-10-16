@@ -1,0 +1,21 @@
+# Streamlit & UI Components
+streamlit==1.44.1
+streamlit-aggrid==1.2.1.post2
+
+# Data Processing, Numerical Computing & Excel
+pandas==2.2.3
+numpy==1.26.4
+openpyxl==3.1.5
+
+# Database & Supabase Integration
+supabase==2.15.3
+
+# Data Visualization
+plotly==5.24.1
+
+# Configuration, HTTP & SSL
+python-decouple==3.8
+requests==2.32.3
+httpx==0.28.1
+certifi>=2024.2.2
+toml==0.10.2

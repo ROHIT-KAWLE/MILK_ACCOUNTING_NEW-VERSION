@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Phone Lock Screen</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 560px;
+      max-height: 560px;
+      overflow: hidden;
+      background: transparent;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #0f172a;
+    }
+
+    .phone-lock-wrapper {
+      width: 100%;
+      max-width: 330px;
+      height: 548px;
+      max-height: 548px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 28px;
+      box-shadow: 0 14px 34px -8px rgba(37, 99, 235, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+      padding: 14px 16px 12px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    /* Live Clock & Date */
+    .lock-time {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: #0f172a;
+      line-height: 1;
+      margin-top: 0;
+    }
+
+    .lock-date {
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748b;
+      margin-top: 2px;
+      letter-spacing: -0.01em;
+    }
+
+    /* App Header / Avatar */
+    .app-brand {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #f1f5f9;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      margin-top: 6px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .app-brand .icon {
+      font-size: 13px;
+    }
+
+    .app-brand .name {
+      font-size: 10.5px;
+      font-weight: 800;
+      color: #1e293b;
+      letter-spacing: 0.04em;
+    }
+
+    /* Lock Icon & Instruction */
+    .lock-status-icon {
+      margin-top: 6px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #eff6ff;
+      border: 1.5px solid #bfdbfe;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .lock-status-icon.unlocked {
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+      transform: scale(1.1);
+    }
+
+    .lock-heading {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1e293b;
+      margin-top: 4px;
+    }
+
+    .lock-subheading {
+      font-size: 11px;
+      font-weight: 500;
+      color: #64748b;
+      margin-top: 1px;
+    }
+
+    /* 4 PIN Dots */
+    .pin-dots-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin: 8px 0 4px 0;
+      padding: 2px 8px;
+      min-height: 20px;
+    }
+
+    .pin-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid #cbd5e1;
+      background: transparent;
+      transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .pin-dot.filled {
+      background: #2563eb;
+      border-color: #2563eb;
+      transform: scale(1.15);
+      box-shadow: 0 0 8px rgba(37, 99, 235, 0.4);
+    }
+
+    .pin-dot.success {
+      background: #10b981 !important;
+      border-color: #10b981 !important;
+      transform: scale(1.25) !important;
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.6) !important;
+    }
+
+    .pin-dot.error {
+      background: #ef4444 !important;
+      border-color: #ef4444 !important;
+      transform: scale(1.2) !important;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.5) !important;
+    }
+
+    /* Shake Animation for incorrect PIN */
+    @keyframes shakeAnimation {
+      0%, 100% { transform: translateX(0); }
+      15%, 45%, 75% { transform: translateX(-7px); }
+      30%, 60%, 90% { transform: translateX(7px); }
+    }
+
+    .shake {
+      animation: shakeAnimation 0.35s ease-in-out;
+    }
+
+    /* Status / Error Toast */
+    .status-msg {
+      font-size: 11px;
+      font-weight: 600;
+      min-height: 15px;
+      margin-bottom: 4px;
+      transition: all 0.18s ease;
+      color: #64748b;
+    }
+
+    .status-msg.error {
+      color: #dc2626;
+      font-weight: 700;
+    }
+
+    .status-msg.success {
+      color: #059669;
+      font-weight: 700;
+    }
+
+    /* Keypad Grid (3 columns x 4 rows) */
+    .keypad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px 14px;
+      width: 100%;
+      max-width: 255px;
+      margin: 2px auto 4px auto;
+    }
+
+    .key-btn {
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      margin: 0 auto;
+      touch-action: manipulation;
+      transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.04);
+      outline: none;
+    }
+
+    .key-btn:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      transform: translateY(-1px);
+    }
+
+    .key-btn:active, .key-btn.active-key {
+      background: #2563eb !important;
+      border-color: #2563eb !important;
+      transform: scale(0.92) !important;
+      box-shadow: 0 0 10px rgba(37, 99, 235, 0.35) !important;
+    }
+
+    .key-btn:active .key-num, .key-btn.active-key .key-num {
+      color: #ffffff !important;
+    }
+
+    .key-btn:active .key-letters, .key-btn.active-key .key-letters {
+      color: rgba(255, 255, 255, 0.8) !important;
+    }
+
+    .key-btn.disabled {
+      opacity: 0.4;
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+
+    .key-num {
+      font-size: 22px;
+      font-weight: 600;
+      color: #0f172a;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .key-letters {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      color: #94a3b8;
+      margin-top: 1.5px;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    /* Functional Action Keys (Clear, Backspace) */
+    .key-action {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    .key-action:hover {
+      background: #f1f5f9;
+      border-color: #e2e8f0;
+    }
+
+    .key-action:active, .key-action.active-key {
+      background: #e2e8f0 !important;
+      border-color: #cbd5e1 !important;
+      transform: scale(0.92) !important;
+      box-shadow: none !important;
+    }
+
+    .key-action:active svg path, .key-action.active-key svg path {
+      stroke: #0f172a !important;
+    }
+
+    .key-action-text {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #475569;
+      letter-spacing: 0.02em;
+    }
+
+    /* Footer Hint */
+    .lock-footer-hint {
+      margin-top: 6px;
+      font-size: 10.5px;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="phone-lock-wrapper" id="lockWrapper">
+    <!-- Live Time & Date -->
+    <div class="lock-time" id="lockTime">12:00</div>
+    <div class="lock-date" id="lockDate">शुक्रवार, १६ ऑक्टोबर</div>
+
+    <!-- App Name Badge -->
+    <div class="app-brand">
+      <span class="icon">🥛</span>
+      <span class="name">MILK ACCOUNTING PRO</span>
+    </div>
+
+    <!-- Lock Status Icon -->
+    <div class="lock-status-icon" id="lockIcon">
+      🔒
+    </div>
+
+    <div class="lock-heading" id="lockTitle">सुरक्षित प्रवेश कुलूप</div>
+    <div class="lock-subheading" id="lockSubtitle">4-अंकी पिन टाका (Enter 4-Digit PIN)</div>
+
+    <!-- 4 PIN Dots -->
+    <div class="pin-dots-container" id="pinDots">
+      <div class="pin-dot" id="dot0"></div>
+      <div class="pin-dot" id="dot1"></div>
+      <div class="pin-dot" id="dot2"></div>
+      <div class="pin-dot" id="dot3"></div>
+    </div>
+
+    <!-- Status / Error Notification -->
+    <div class="status-msg" id="statusMsg"></div>
+
+    <!-- Phone Keypad Grid -->
+    <div class="keypad-grid" id="keypadGrid">
+      <!-- Row 1 -->
+      <button class="key-btn" data-key="1">
+        <span class="key-num">1</span>
+        <span class="key-letters">&nbsp;</span>
+      </button>
+      <button class="key-btn" data-key="2">
+        <span class="key-num">2</span>
+        <span class="key-letters">ABC</span>
+      </button>
+      <button class="key-btn" data-key="3">
+        <span class="key-num">3</span>
+        <span class="key-letters">DEF</span>
+      </button>
+
+      <!-- Row 2 -->
+      <button class="key-btn" data-key="4">
+        <span class="key-num">4</span>
+        <span class="key-letters">GHI</span>
+      </button>
+      <button class="key-btn" data-key="5">
+        <span class="key-num">5</span>
+        <span class="key-letters">JKL</span>
+      </button>
+      <button class="key-btn" data-key="6">
+        <span class="key-num">6</span>
+        <span class="key-letters">MNO</span>
+      </button>
+
+      <!-- Row 3 -->
+      <button class="key-btn" data-key="7">
+        <span class="key-num">7</span>
+        <span class="key-letters">PQRS</span>
+      </button>
+      <button class="key-btn" data-key="8">
+        <span class="key-num">8</span>
+        <span class="key-letters">TUV</span>
+      </button>
+      <button class="key-btn" data-key="9">
+        <span class="key-num">9</span>
+        <span class="key-letters">WXYZ</span>
+      </button>
+
+      <!-- Row 4 -->
+      <button class="key-btn key-action" id="btnClear" data-key="clear">
+        <span class="key-action-text">Clear</span>
+      </button>
+      <button class="key-btn" data-key="0">
+        <span class="key-num">0</span>
+        <span class="key-letters">+</span>
+      </button>
+      <button class="key-btn key-action" id="btnBackspace" data-key="backspace">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 4H8L1 12L8 20H21C21.5304 20 22.0391 19.7893 22.4142 19.4142C22.7893 19.0391 23 18.5304 23 18V6C23 5.46957 22.7893 4.96086 22.4142 4.58579C22.0391 4.21071 21.5304 4 21 4Z" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 9L12 15" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 9L18 15" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Security Hint -->
+    <div class="lock-footer-hint">
+      🔒 कीबोर्ड किंवा नंबर पॅड वापरा (Number Pad or Keyboard)
+    </div>
+  </div>
+
+  <script>
+    // System Target PIN (Default 7744)
+    let TARGET_PIN = "7744";
+    let enteredPin = "";
+    let isProcessing = false;
+    let failedAttempts = 0;
+    let lockoutTimer = null;
+
+    const lockWrapper = document.getElementById("lockWrapper");
+    const lockIcon = document.getElementById("lockIcon");
+    const lockTitle = document.getElementById("lockTitle");
+    const lockSubtitle = document.getElementById("lockSubtitle");
+    const pinDots = document.getElementById("pinDots");
+    const statusMsg = document.getElementById("statusMsg");
+    const keypadGrid = document.getElementById("keypadGrid");
+    const dots = [
+      document.getElementById("dot0"),
+      document.getElementById("dot1"),
+      document.getElementById("dot2"),
+      document.getElementById("dot3")
+    ];
+
+    // Live Clock & Marathi Date
+    function updateClock() {
+      const now = new Date();
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById("lockTime").textContent = `${hours}:${minutes}`;
+
+      const options = { weekday: 'long', day: 'numeric', month: 'long' };
+      try {
+        document.getElementById("lockDate").textContent = now.toLocaleDateString('mr-IN', options);
+      } catch (e) {
+        document.getElementById("lockDate").textContent = now.toLocaleDateString('en-US', options);
+      }
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // Streamlit Component Protocol Handlers
+    function sendStreamlitMessage(type, payload = {}) {
+      try {
+        window.parent.postMessage({
+          isStreamlitMessage: true,
+          type: type,
+          ...payload
+        }, "*");
+      } catch (e) {}
+    }
+
+    // STRICT FIXED HEIGHT: Exact 560px frame height (prevents recursive expansion loop)
+    function sendHeight() {
+      sendStreamlitMessage("streamlit:setFrameHeight", { height: 560 });
+    }
+
+    function setComponentValue(val) {
+      sendStreamlitMessage("streamlit:setComponentValue", { value: val });
+    }
+
+    // Listen to Streamlit Render and Parent Messages
+    window.addEventListener("message", function(event) {
+      if (!event.data) return;
+
+      if (event.data.type === "streamlit:render") {
+        if (event.data.args && event.data.args.target_pin) {
+          TARGET_PIN = String(event.data.args.target_pin).trim();
+        }
+        sendHeight();
+      } else if (event.data.type === "PARENT_KEY") {
+        // Keyboard keystroke forwarded from parent page
+        handlePhysicalKey(event.data.key);
+      }
+    });
+
+    // Notify Streamlit that Component is Ready
+    sendStreamlitMessage("streamlit:componentReady", { apiVersion: 1 });
+    window.addEventListener("DOMContentLoaded", sendHeight);
+    window.addEventListener("load", sendHeight);
+
+    // Haptic Feedback for Mobile Touch
+    function vibrate(duration = 20) {
+      try {
+        if ("vibrate" in navigator) {
+          navigator.vibrate(duration);
+        }
+      } catch (e) {}
+    }
+
+    // Update Dots UI
+    function updateDotsUI() {
+      for (let i = 0; i < 4; i++) {
+        if (i < enteredPin.length) {
+          dots[i].classList.add("filled");
+        } else {
+          dots[i].classList.remove("filled", "success", "error");
+        }
+      }
+    }
+
+    // Key Press Handler
+    function handleDigit(digit) {
+      if (isProcessing) return;
+      if (enteredPin.length < 4) {
+        enteredPin += digit;
+        vibrate(18);
+        updateDotsUI();
+
+        // INSTANT AUTO-UNLOCK when 4 digits are entered!
+        if (enteredPin.length === 4) {
+          verifyPin();
+        }
+      }
+    }
+
+    function handleBackspace() {
+      if (isProcessing) return;
+      if (enteredPin.length > 0) {
+        enteredPin = enteredPin.slice(0, -1);
+        vibrate(15);
+        updateDotsUI();
+        clearError();
+      }
+    }
+
+    function handleClear() {
+      if (isProcessing) return;
+      enteredPin = "";
+      vibrate(25);
+      updateDotsUI();
+      clearError();
+    }
+
+    function clearError() {
+      statusMsg.textContent = "";
+      statusMsg.className = "status-msg";
+      pinDots.classList.remove("shake");
+      dots.forEach(d => d.classList.remove("error", "success"));
+    }
+
+    // VERIFY PIN AUTOMATICALLY WHEN 4 DIGITS ARE TYPED
+    function verifyPin() {
+      if (enteredPin === TARGET_PIN) {
+        // SUCCESS: AUTOMATIC UNLOCK!
+        isProcessing = true;
+        vibrate([40, 60, 40]);
+
+        // Visual Unlock State
+        lockIcon.textContent = "🔓";
+        lockIcon.classList.add("unlocked");
+        lockTitle.textContent = "प्रवेश मंजूर! (Access Granted)";
+        lockSubtitle.textContent = "प्रणाली उघडत आहे... (Opening System...)";
+        statusMsg.textContent = "✓ योग्य पिन! स्वागत आहे (Unlocked!)";
+        statusMsg.className = "status-msg success";
+
+        dots.forEach(d => {
+          d.classList.remove("error");
+          d.classList.add("success");
+        });
+
+        // Send authenticated PIN value to Streamlit
+        setComponentValue(enteredPin);
+
+      } else {
+        // INCORRECT PIN: Shake, Red Glow, Error Toast, Reset without reloading page
+        isProcessing = true;
+        failedAttempts += 1;
+        vibrate([100, 50, 100]);
+
+        pinDots.classList.add("shake");
+        dots.forEach(d => d.classList.add("error"));
+
+        if (failedAttempts >= 5) {
+          // Trigger 30s Security Lockout
+          statusMsg.textContent = "🔒 ५ चुकीचे प्रयत्न! ३० सेकंद थांबा.";
+          statusMsg.className = "status-msg error";
+          setComponentValue("LOCKOUT:30");
+          startLockout(30);
+        } else {
+          const attemptsLeft = 5 - failedAttempts;
+          statusMsg.textContent = `❌ चुकीचा पिन! (${attemptsLeft} प्रयत्न शिल्लक)`;
+          statusMsg.className = "status-msg error";
+
+          // Reset dots after shake animation finishes so user can immediately retry
+          setTimeout(() => {
+            enteredPin = "";
+            updateDotsUI();
+            pinDots.classList.remove("shake");
+            dots.forEach(d => d.classList.remove("error"));
+            isProcessing = false;
+          }, 450);
+        }
+      }
+    }
+
+    function startLockout(seconds) {
+      let remaining = seconds;
+      document.querySelectorAll(".key-btn").forEach(btn => btn.classList.add("disabled"));
+      lockTitle.textContent = "प्रणाली तात्पुरती कुलूपबंद";
+      lockSubtitle.textContent = "सुरक्षिततेसाठी कुलूपबंद करण्यात आले आहे.";
+
+      if (lockoutTimer) clearInterval(lockoutTimer);
+      lockoutTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearInterval(lockoutTimer);
+          lockoutTimer = null;
+          failedAttempts = 0;
+          isProcessing = false;
+          enteredPin = "";
+          updateDotsUI();
+          clearError();
+          document.querySelectorAll(".key-btn").forEach(btn => btn.classList.remove("disabled"));
+          lockTitle.textContent = "सुरक्षित प्रवेश कुलूप";
+          lockSubtitle.textContent = "4-अंकी पिन टाका (Enter 4-Digit PIN)";
+        } else {
+          statusMsg.textContent = `🔒 कृपया प्रतीक्षा करा: ${remaining} सेकंद`;
+        }
+      }, 1000);
+    }
+
+    // Physical key processing
+    function handlePhysicalKey(key) {
+      if (key >= "0" && key <= "9") {
+        const btn = document.querySelector(`.key-btn[data-key="${key}"]`);
+        if (btn) {
+          btn.classList.add("active-key");
+          setTimeout(() => btn.classList.remove("active-key"), 120);
+        }
+        handleDigit(key);
+      } else if (key === "Backspace") {
+        const btn = document.getElementById("btnBackspace");
+        if (btn) {
+          btn.classList.add("active-key");
+          setTimeout(() => btn.classList.remove("active-key"), 120);
+        }
+        handleBackspace();
+      } else if (key === "Escape" || key.toLowerCase() === "c") {
+        const btn = document.getElementById("btnClear");
+        if (btn) {
+          btn.classList.add("active-key");
+          setTimeout(() => btn.classList.remove("active-key"), 120);
+        }
+        handleClear();
+      }
+    }
+
+    // Click and Touch Listener for Keypad Buttons
+    document.querySelectorAll(".key-btn").forEach(btn => {
+      const key = btn.getAttribute("data-key");
+
+      btn.addEventListener("click", function(e) {
+        e.preventDefault();
+        btn.classList.add("active-key");
+        setTimeout(() => btn.classList.remove("active-key"), 120);
+
+        if (key === "backspace") {
+          handleBackspace();
+        } else if (key === "clear") {
+          handleClear();
+        } else if (key >= "0" && key <= "9") {
+          handleDigit(key);
+        }
+      });
+    });
+
+    // Keyboard Listener (Inside Iframe)
+    window.addEventListener("keydown", function(e) {
+      handlePhysicalKey(e.key);
+    });
+  </script>
+</body>
+</html>

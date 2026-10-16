@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Assistant</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Devanagari", sans-serif;
+    }
+    body {
+      background-color: transparent;
+      padding: 8px 4px;
+      color: #1e293b;
+    }
+    .voice-card {
+      background: linear-gradient(145deg, #ffffff, #f8fafc);
+      border: 1.5px solid #cbd5e1;
+      border-radius: 14px;
+      padding: 14px 16px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0369a1;
+      background: #e0f2fe;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    .lang-pills, .mode-pills {
+      display: flex;
+      gap: 6px;
+    }
+    .pill {
+      font-size: 12px;
+      padding: 5px 11px;
+      border-radius: 16px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #475569;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-weight: 600;
+      user-select: none;
+    }
+    .pill.active {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #0284c7;
+      box-shadow: 0 2px 6px rgba(2, 132, 199, 0.3);
+    }
+    .main-row {
+      display: flex;
+      gap: 12px;
+      align-items: stretch;
+      min-height: 56px;
+    }
+    .mic-btn {
+      flex: 0 0 auto;
+      min-width: 175px;
+      border: none;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 10px 14px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+      transition: all 0.2s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mic-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(2, 132, 199, 0.45);
+    }
+    .mic-btn.recording {
+      background: linear-gradient(135deg, #dc2626, #b91c1c);
+      animation: pulse-border 1.5s infinite;
+      box-shadow: 0 4px 16px rgba(220, 38, 38, 0.45);
+    }
+    .mic-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .mic-sub {
+      font-size: 11px;
+      opacity: 0.9;
+      font-weight: 500;
+    }
+    @keyframes pulse-border {
+      0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.6); }
+      70% { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+    }
+    .transcript-box {
+      flex: 1;
+      background: #ffffff;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .transcript-input {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      min-height: 40px;
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 14px;
+      color: #0f172a;
+      font-weight: 600;
+      resize: none;
+      line-height: 1.4;
+    }
+    .transcript-input::placeholder {
+      color: #94a3b8;
+      font-weight: 400;
+      font-style: italic;
+    }
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .btn-action {
+      height: 38px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 700;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn-apply {
+      background: #16a34a;
+      color: #ffffff;
+    }
+    .btn-apply:hover { background: #15803d; }
+    .btn-clear {
+      background: #f1f5f9;
+      color: #64748b;
+    }
+    .btn-clear:hover { background: #e2e8f0; color: #334155; }
+    .status-bar {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #64748b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+    .dot-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #94a3b8;
+    }
+    .dot-pulse.active {
+      background: #ef4444;
+      animation: blink 1s infinite alternate;
+    }
+    @keyframes blink {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+    .chips-row {
+      margin-top: 10px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .chip-label {
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .chip {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 4px 9px;
+      font-size: 12px;
+      color: #334155;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .chip:hover {
+      background: #e2e8f0;
+      border-color: #cbd5e1;
+    }
+    .error-msg {
+      color: #dc2626;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 6px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="voice-card">
+    <div class="header-row">
+      <div class="badge">
+        <span>🎙️ आवाज सहायक (AI Voice Engine)</span>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <div class="mode-pills">
+          <button class="pill active" id="mode-retailer" onclick="setMode('retailer_delivery')">🛒 ग्राहक</button>
+          <button class="pill" id="mode-expense" onclick="setMode('route_expense')">⛽ गाडी खर्च</button>
+          <button class="pill" id="mode-distributor" onclick="setMode('distributor_procurement')">🏭 खरेदी</button>
+        </div>
+        <div class="lang-pills">
+          <button class="pill active" id="lang-mr" onclick="setLang('mr-IN')">मराठी</button>
+          <button class="pill" id="lang-en" onclick="setLang('en-IN')">English</button>
+          <button class="pill" id="lang-hi" onclick="setLang('hi-IN')">हिंदी</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-row">
+      <button class="mic-btn" id="mic-btn" onclick="toggleRecording()">
+        <span class="mic-title">
+          <span id="mic-icon">🎙️</span>
+          <span id="mic-label">बोला सुरू करा</span>
+        </span>
+        <span class="mic-sub" id="mic-sub">दाबा आणि बोला</span>
+      </button>
+
+      <div class="transcript-box">
+        <textarea
+          class="transcript-input"
+          id="transcript-input"
+          placeholder="माईक दाबा आणि बोला (उदा: 'गुलमोहर डेअरी वीस म्हैस रोख पाच हजार')..."
+          oninput="onManualInput()"
+          rows="1"
+        ></textarea>
+        <div class="actions">
+          <button class="btn-action btn-apply" id="btn-apply" onclick="applySpokenText()" title="Apply to Entry">
+            ⚡ वापरा
+          </button>
+          <button class="btn-action btn-clear" id="btn-clear" onclick="clearText()" title="Clear">
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="chips-row">
+      <span class="chip-label">उदाहरणे:</span>
+      <span class="chip" onclick="useSample('गुलमोहर डेअरी २० म्हैस रोख ५०००')">गुलमोहर २० म्हैस रोख ५०००</span>
+      <span class="chip" onclick="useSample('१० गाय लक्ष्मी डेअरी')">१० गाय लक्ष्मी डेअरी</span>
+      <span class="chip" onclick="useSample('डिझेल १५०० रोख')">डिझेल १५०० रोख</span>
+      <span class="chip" onclick="useSample('नाश्ता २५० रोख')">नाश्ता २५० रोख</span>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-indicator">
+        <span class="dot-pulse" id="dot-pulse"></span>
+        <span id="status-text">तयार आहे (Ready) • १०% स्थानिक AI</span>
+      </div>
+      <span id="timer-text" style="font-weight:700; color:#0369a1;"></span>
+    </div>
+  </div>
+
+  <script>
+    let currentLang = 'mr-IN';
+    let currentMode = 'retailer_delivery';
+    let shouldKeepListening = false;
+    let recognition = null;
+    let accumulatedText = '';
+    let interimText = '';
+    let timerInterval = null;
+    let secondsElapsed = 0;
+
+    // Streamlit Component Protocol
+    function postStreamlit(type, data) {
+      const msg = Object.assign({
+        isStreamlitMessage: true,
+        type: type
+      }, data);
+      window.parent.postMessage(msg, "*");
+    }
+
+    function notifyHeight() {
+      const height = document.body.scrollHeight || 190;
+      postStreamlit("streamlit:setFrameHeight", { height: Math.max(height + 15, 190) });
+    }
+
+    function sendToStreamlit(text) {
+      if (!text || !text.trim()) return;
+      postStreamlit("streamlit:setComponentValue", {
+        value: {
+          transcript: text.trim(),
+          language: currentLang,
+          mode: currentMode,
+          timestamp: Date.now()
+        }
+      });
+    }
+
+    // Initialize Web Speech Recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    function startEngine() {
+      if (!shouldKeepListening) return;
+
+      if (!SpeechRecognition) {
+        showError("⚠️ Browser does not support Web Speech API. Use Google Chrome or tap keyboard mic.");
+        shouldKeepListening = false;
+        updateUI(false);
+        return;
+      }
+
+      try {
+        if (recognition) {
+          try { recognition.abort(); } catch (e) {}
+          recognition = null;
+        }
+
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = currentLang;
+
+        recognition.onstart = function() {
+          clearError();
+          updateUI(true);
+          setStatus("🔴 चालू आहे — बोला सुरू ठेवा (Listening...)");
+        };
+
+        recognition.onresult = function(event) {
+          interimText = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const chunk = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              accumulatedText = (accumulatedText ? accumulatedText + ' ' : '') + chunk.trim();
+            } else {
+              interimText = (interimText ? interimText + ' ' : '') + chunk.trim();
+            }
+          }
+          const fullText = (accumulatedText + (interimText ? ' ' + interimText : '')).trim();
+          setTextArea(fullText);
+        };
+
+        recognition.onerror = function(event) {
+          console.warn("Speech recognition notice:", event.error);
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            shouldKeepListening = false;
+            stopTimer();
+            updateUI(false);
+            showError("❌ Microphone permission denied. Please allow microphone in browser.");
+          }
+          // 'no-speech' or 'network' is handled cleanly by auto-reconnect in onend
+        };
+
+        recognition.onend = function() {
+          if (shouldKeepListening) {
+            // Chrome naturally closes after ~10-15s of silence or long audio chunk.
+            // Automatically launch a fresh instance after 120ms so it records continuously!
+            setTimeout(function() {
+              if (shouldKeepListening) {
+                startEngine();
+              }
+            }, 120);
+          } else {
+            updateUI(false);
+          }
+        };
+
+        recognition.start();
+      } catch (err) {
+        console.error("Start error:", err);
+        if (shouldKeepListening) {
+          setTimeout(function() {
+            if (shouldKeepListening) startEngine();
+          }, 250);
+        }
+      }
+    }
+
+    function toggleRecording() {
+      if (!SpeechRecognition) {
+        showError("⚠️ कृपया Google Chrome वापरा किंवा कीबोर्डवरील माईक वापरा.");
+        return;
+      }
+
+      if (shouldKeepListening) {
+        // Explicit user STOP
+        shouldKeepListening = false;
+        stopTimer();
+        if (recognition) {
+          try { recognition.stop(); } catch (e) {}
+        }
+        updateUI(false);
+        setStatus("✅ बोलणे पूर्ण झाले (Recording Stopped) • तपासत आहे...");
+        const finalVal = document.getElementById("transcript-input").value.trim();
+        if (finalVal) {
+          sendToStreamlit(finalVal);
+        }
+      } else {
+        // Explicit user START
+        clearError();
+        accumulatedText = '';
+        interimText = '';
+        setTextArea('');
+        shouldKeepListening = true;
+        startTimer();
+        startEngine();
+      }
+    }
+
+    function startTimer() {
+      stopTimer();
+      secondsElapsed = 0;
+      updateTimerDisplay();
+      timerInterval = setInterval(function() {
+        secondsElapsed++;
+        updateTimerDisplay();
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      document.getElementById("timer-text").innerText = "";
+    }
+
+    function updateTimerDisplay() {
+      const mins = Math.floor(secondsElapsed / 60);
+      const secs = secondsElapsed % 60;
+      const str = "⏱️ " + (mins < 10 ? "0" : "") + mins + ":" + (secs < 10 ? "0" : "") + secs;
+      document.getElementById("timer-text").innerText = str;
+    }
+
+    function updateUI(recording) {
+      const btn = document.getElementById("mic-btn");
+      const icon = document.getElementById("mic-icon");
+      const label = document.getElementById("mic-label");
+      const sub = document.getElementById("mic-sub");
+      const dot = document.getElementById("dot-pulse");
+
+      if (recording) {
+        btn.classList.add("recording");
+        icon.innerText = "⏹️";
+        label.innerText = "थांबवा (Stop)";
+        sub.innerText = "थांबवण्यासाठी येथे दाबा";
+        dot.classList.add("active");
+      } else {
+        btn.classList.remove("recording");
+        icon.innerText = "🎙️";
+        label.innerText = "बोला सुरू करा";
+        sub.innerText = "दाबा आणि बोला";
+        dot.classList.remove("active");
+      }
+      notifyHeight();
+    }
+
+    function setTextArea(text) {
+      const input = document.getElementById("transcript-input");
+      input.value = text;
+      notifyHeight();
+    }
+
+    function onManualInput() {
+      const input = document.getElementById("transcript-input");
+      accumulatedText = input.value;
+    }
+
+    function applySpokenText() {
+      if (shouldKeepListening) {
+        shouldKeepListening = false;
+        stopTimer();
+        if (recognition) {
+          try { recognition.stop(); } catch (e) {}
+        }
+        updateUI(false);
+      }
+      const val = document.getElementById("transcript-input").value.trim();
+      if (val) {
+        sendToStreamlit(val);
+        setStatus("✅ पाठवले (Applied to Entry)!");
+      } else {
+        showError("⚠️ कृपया आधी बोला किंवा उदाहरण निवडा.");
+      }
+    }
+
+    function clearText() {
+      if (shouldKeepListening) {
+        shouldKeepListening = false;
+        stopTimer();
+        if (recognition) {
+          try { recognition.stop(); } catch (e) {}
+        }
+        updateUI(false);
+      }
+      accumulatedText = '';
+      interimText = '';
+      setTextArea('');
+      clearError();
+      setStatus("तयार आहे (Ready)");
+    }
+
+    function useSample(text) {
+      if (shouldKeepListening) {
+        shouldKeepListening = false;
+        stopTimer();
+        if (recognition) {
+          try { recognition.stop(); } catch (e) {}
+        }
+        updateUI(false);
+      }
+      accumulatedText = text;
+      interimText = '';
+      setTextArea(text);
+      sendToStreamlit(text);
+      setStatus("✅ निवडले: " + text);
+    }
+
+    function setLang(lang) {
+      currentLang = lang;
+      document.querySelectorAll('.lang-pills .pill').forEach(el => el.classList.remove('active'));
+      if (lang === 'mr-IN') document.getElementById('lang-mr').classList.add('active');
+      if (lang === 'en-IN') document.getElementById('lang-en').classList.add('active');
+      if (lang === 'hi-IN') document.getElementById('lang-hi').classList.add('active');
+      if (shouldKeepListening) {
+        startEngine();
+      }
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.mode-pills .pill').forEach(el => el.classList.remove('active'));
+      if (mode === 'retailer_delivery') {
+        document.getElementById('mode-retailer').classList.add('active');
+      } else if (mode === 'route_expense') {
+        document.getElementById('mode-expense').classList.add('active');
+      } else if (mode === 'distributor_procurement') {
+        document.getElementById('mode-distributor').classList.add('active');
+      }
+    }
+
+    function setStatus(msg) {
+      document.getElementById("status-text").innerText = msg;
+    }
+
+    function showError(msg) {
+      const err = document.getElementById("error-msg");
+      err.innerText = msg;
+      err.style.display = "block";
+      notifyHeight();
+    }
+
+    function clearError() {
+      const err = document.getElementById("error-msg");
+      err.innerText = "";
+      err.style.display = "none";
+      notifyHeight();
+    }
+
+    // Streamlit event listener
+    window.addEventListener("message", function(event) {
+      if (event.data && event.data.type === "streamlit:render") {
+        const args = event.data.args || {};
+        if (args.default_lang) setLang(args.default_lang);
+        if (args.default_mode) setMode(args.default_mode);
+        notifyHeight();
+      }
+    });
+
+    // Notify ready on window load
+    window.addEventListener("load", function() {
+      postStreamlit("streamlit:componentReady", { apiVersion: 1 });
+      notifyHeight();
+    });
+  </script>
+</body>
+</html>
