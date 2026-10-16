@@ -8474,7 +8474,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                         "Amount ₹",
                         min_value=0.0,
                         step=50.0,
-                        format="₹%.2f",
+                        format="₹%g",
                         required=True,
                     ),
                     "Payment Mode": st.column_config.SelectboxColumn(
@@ -8539,10 +8539,10 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
             with h_c2:
                 actual_cash_handover_val = st.number_input(
                     "ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹)",
-                    min_value=0,
-                    value=int(round(float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0)))),
-                    step=100,
-                    format="%d",
+                    min_value=0.0,
+                    value=float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0.0)),
+                    step=50.0,
+                    format="%g",
                     key=f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}",
                     label_visibility="collapsed",
                     help="गाडीवरून परत आल्यावर ड्रायव्हरने काऊंटरवर प्रत्यक्षात मोजून दिलेली रोख रक्कम.",
@@ -8579,7 +8579,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                         "Amount ₹",
                         min_value=0.0,
                         step=50.0,
-                        format="₹%.2f",
+                        format="₹%g",
                         required=True,
                     ),
                     "Payment Mode": st.column_config.SelectboxColumn(
@@ -10183,7 +10183,7 @@ th {{ background: #0f172a; color: #fff; }}
                     "नवीन दर / पगार रक्कम (New Rate ₹)*",
                     min_value=0.0,
                     step=50.0,
-                    format="%.2f",
+                    format="%g",
                     key="wage_rev_new_rate",
                 )
                 rev_stype = st.selectbox(
@@ -10289,7 +10289,7 @@ th {{ background: #0f172a; color: #fff; }}
 
             nw_s1, nw_s2 = st.columns([1, 1])
             with nw_s1:
-                w_rate = st.number_input("दर / पगार रक्कम (Rate ₹)", min_value=0.0, step=50.0, format="%.2f")
+                w_rate = st.number_input("दर / पगार रक्कम (Rate ₹)", min_value=0.0, step=50.0, format="%g")
             with nw_s2:
                 st.write("")
                 st.write("")
@@ -10388,6 +10388,7 @@ elif menu == "🤖 AI Audit & Anomaly Detection":
             min_value=0.0,
             value=float(st.session_state.get(handover_key, 0.0)),
             step=500.0,
+            format="%g",
             key=f"driver_cash_inp_{audit_zone}_{audit_date}",
         )
         if driver_cash_in > 0:
@@ -11146,7 +11147,7 @@ elif menu == "💰 Price Management":
                 min_value=0.0,
                 step=0.5,
                 value=2.0,
-                format="%.2f",
+                format="%g",
                 key="bulk_delta_val",
             )
         with bcol4:
