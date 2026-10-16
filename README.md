@@ -23,32 +23,27 @@ Deploying Milk Accounting Pro to Streamlit Cloud takes under 2 minutes:
 ### Step 1: Push Repository to GitHub
 Ensure all code and components are pushed to your GitHub repository:
 ```bash
-git init
-git add .
-git commit -m "feat: production-ready Milk Accounting Pro"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+# Push directly to your GitHub repository
 git push -u origin main
 ```
 
 ### Step 2: Connect with Streamlit Cloud
-1. Go to [share.streamlit.io](https://share.streamlit.io/) and sign in with GitHub.
-2. Click **New app**.
-3. Choose your repository, branch (`main`), and set **Main file path** to:
-   ```text
-   app.py
-   ```
+1. Go to **[share.streamlit.io](https://share.streamlit.io/)** and sign in with GitHub.
+2. Click **Create app** (or **New app**).
+3. Select your repository:
+   - **Repository**: `ROHIT-KAWLE/MILK_ACCOUNTING_NEW-VERSION`
+   - **Branch**: `main`
+   - **Main file path**: `app.py`
 4. Click **Advanced settings...** and navigate to **Secrets**.
 
 ### Step 3: Configure Supabase Secrets
-Paste your Supabase credentials into the Secrets box:
+Paste your existing Supabase database credentials into the Secrets box:
 ```toml
 [supabase]
-url = "https://your-project.supabase.co"
-service_role_key = "your-service-role-key"
-anon_key = "your-anon-key"
+url = "https://vxdtumlygjeozglztwlx.supabase.co"
+service_role_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ4ZHR1bWx5Z2plb3pnbHp0d2x4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDIyMzgxNSwiZXhwIjoyMDg1Nzk5ODE1fQ.DLDkSUdceRssEgIFhoZFqeEQF-kTVqfOYFiZB1imQxo"
+anon_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ4ZHR1bWx5Z2plb3pnbHp0d2x4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAyMjM4MTUsImV4cCI6MjA4NTc5OTgxNX0.qDYH11D79mT69OiWq03bhP4A0gK4S1hedHo_1f5EcUQ"
 ```
-*(Reference: see `.streamlit/secrets.toml.example`)*
 
 5. Click **Deploy!**
 
@@ -76,7 +71,7 @@ anon_key = "your-anon-key"
 ### 2. Installation
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git clone https://github.com/ROHIT-KAWLE/MILK_ACCOUNTING_NEW-VERSION.git
 cd milk_account-main
 
 # Create virtual environment
