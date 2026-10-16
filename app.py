@@ -8490,20 +8490,63 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                 key=f"route_exp_editor_{ctx}",
             )
 
-            # Driver Actual Cash Handover Input (inside form, right after Route Expenses)
+            # Driver Actual Cash Handover Input (Compact 2-inch Entry Cell)
             st.markdown("---")
             st.markdown(f"#### 📥 ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (Actual Handover — {posting_zone})")
             st.caption("गाडीवरून परत आल्यावर ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख रक्कम येथे भरा. खालील एकाच सेव्ह बटणाने सर्व माहिती सेव्ह होईल.")
             saved_h_val = get_driver_actual_handover(posting_date, posting_zone)
-            actual_cash_handover_val = st.number_input(
-                "ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹)",
-                min_value=0.0,
-                value=float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0.0)),
-                step=50.0,
-                format="%.2f",
-                key=f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}",
-                help="गाडीवरून परत आल्यावर ड्रायव्हरने काऊंटरवर प्रत्यक्षात मोजून दिलेली रोख रक्कम.",
+
+            # Compact 2-inch entry cell layout (matching table entry cell structure)
+            st.markdown(
+                """
+                <style>
+                div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) {
+                    width: 180px !important;
+                    max-width: 180px !important;
+                    margin: 0 !important;
+                }
+                div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) div[data-baseweb="input"] {
+                    border: 1.5px solid #cbd5e1 !important;
+                    border-radius: 6px !important;
+                    background: #f8fafc !important;
+                    height: 38px !important;
+                }
+                div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) input {
+                    font-size: 15px !important;
+                    font-weight: 800 !important;
+                    color: #0f172a !important;
+                    text-align: right !important;
+                    padding: 4px 10px !important;
+                }
+                div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) div[data-baseweb="input"]:focus-within {
+                    border-color: #2563eb !important;
+                    background: #ffffff !important;
+                    box-shadow: 0 0 0 2px rgba(37,99,235,0.2) !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
             )
+
+            h_c1, h_c2, _ = st.columns([2.6, 1.4, 4.0], vertical_alignment="center")
+            with h_c1:
+                st.markdown(
+                    "<div style='font-size:13.5px; font-weight:750; color:#1e293b; padding-top:4px;'>"
+                    "💵 ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹):"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+            with h_c2:
+                actual_cash_handover_val = st.number_input(
+                    "ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹)",
+                    min_value=0.0,
+                    value=float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0.0)),
+                    step=50.0,
+                    format="%.2f",
+                    key=f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}",
+                    label_visibility="collapsed",
+                    help="गाडीवरून परत आल्यावर ड्रायव्हरने काऊंटरवर प्रत्यक्षात मोजून दिलेली रोख रक्कम.",
+                )
         else:
             st.markdown("---")
             st.markdown("#### 🏢 General Dairy Overhead Expenses (Outside Routes)")
