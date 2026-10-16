@@ -8501,37 +8501,37 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                 """
                 <style>
                 div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) {
-                    width: 180px !important;
-                    max-width: 180px !important;
+                    width: 230px !important;
+                    max-width: 230px !important;
                     margin: 0 !important;
                 }
                 div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) div[data-baseweb="input"] {
-                    border: 1.5px solid #cbd5e1 !important;
-                    border-radius: 6px !important;
+                    border: 1.8px solid #cbd5e1 !important;
+                    border-radius: 8px !important;
                     background: #f8fafc !important;
-                    height: 38px !important;
+                    height: 44px !important;
                 }
                 div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) input {
-                    font-size: 15px !important;
-                    font-weight: 800 !important;
+                    font-size: 17px !important;
+                    font-weight: 850 !important;
                     color: #0f172a !important;
                     text-align: right !important;
-                    padding: 4px 10px !important;
+                    padding: 6px 12px !important;
                 }
                 div[data-testid="stNumberInput"]:has(input[aria-label*="काऊंटरवर प्रत्यक्षात जमा"]) div[data-baseweb="input"]:focus-within {
                     border-color: #2563eb !important;
                     background: #ffffff !important;
-                    box-shadow: 0 0 0 2px rgba(37,99,235,0.2) !important;
+                    box-shadow: 0 0 0 2.5px rgba(37,99,235,0.25) !important;
                 }
                 </style>
                 """,
                 unsafe_allow_html=True,
             )
 
-            h_c1, h_c2, _ = st.columns([2.6, 1.4, 4.0], vertical_alignment="center")
+            h_c1, h_c2, _ = st.columns([2.5, 1.8, 3.7], vertical_alignment="center")
             with h_c1:
                 st.markdown(
-                    "<div style='font-size:13.5px; font-weight:750; color:#1e293b; padding-top:4px;'>"
+                    "<div style='font-size:14px; font-weight:750; color:#1e293b; padding-top:4px;'>"
                     "💵 ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹):"
                     "</div>",
                     unsafe_allow_html=True,
@@ -8539,10 +8539,10 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
             with h_c2:
                 actual_cash_handover_val = st.number_input(
                     "ड्रायव्हरने काऊंटरवर प्रत्यक्षात जमा केलेली रोख (₹)",
-                    min_value=0.0,
-                    value=float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0.0)),
-                    step=50.0,
-                    format="%.2f",
+                    min_value=0,
+                    value=int(round(float(st.session_state.get(f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}", saved_h_val or 0)))),
+                    step=100,
+                    format="%d",
                     key=f"actual_cash_handover_{posting_zone}_{posting_date}_{ctx}",
                     label_visibility="collapsed",
                     help="गाडीवरून परत आल्यावर ड्रायव्हरने काऊंटरवर प्रत्यक्षात मोजून दिलेली रोख रक्कम.",
