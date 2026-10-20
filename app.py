@@ -5752,13 +5752,13 @@ def build_bill_html(
   .bill-page-wrapper {{
     border: 2px solid #0f172a;
     border-radius: 8px;
-    padding: 22px 24px;
+    padding: 20px 22px;
     background: #ffffff;
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
     margin-bottom: 24px;
     display: flex;
     flex-direction: column;
-    min-height: 297mm;
+    min-height: auto;
     box-sizing: border-box;
   }}
 
@@ -6033,48 +6033,132 @@ def build_bill_html(
   }}
 
   @media print {{
-    @page {{ size: A4 portrait; margin: 5mm 6mm; }}
+    @page {{
+      size: A4 portrait;
+      margin: 4mm 5mm;
+    }}
     html, body {{
-      height: 100% !important;
       margin: 0 !important;
       padding: 0 !important;
-    }}
-    body {{
-      max-width: 100% !important;
-      font-size: 9.5px !important;
-      line-height: 1.25 !important;
       background: #fff !important;
+      font-size: 9.2px !important;
+      line-height: 1.2 !important;
     }}
     .print-btn-bar {{ display: none !important; }}
     .bill-page-wrapper {{
       border: 1.5px solid #0f172a !important;
       border-radius: 4px !important;
-      padding: 10px 12px !important;
+      padding: 6px 8px !important;
       box-shadow: none !important;
-      margin-bottom: 0 !important;
+      margin: 0 !important;
       display: flex !important;
       flex-direction: column !important;
-      min-height: 280mm !important;
+      min-height: auto !important;
+      height: auto !important;
       box-sizing: border-box !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
     }}
     .bill-bottom-group {{
-      margin-top: auto !important;
+      margin-top: 10px !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }}
+    th {{
+      background: #0f172a !important;
+      color: #fff !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      padding: 2.5px 4px !important;
+      font-size: 9px !important;
+    }}
+    td {{
+      padding: 2px 4px !important;
+    }}
+    .total-row td {{
+      background: #0f172a !important;
+      color: #fff !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      font-size: 9.5px !important;
+    }}
+    .st-grand td {{
+      background: #0f172a !important;
+      color: #fff !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      font-size: 11px !important;
+    }}
+    table {{
+      font-size: 8.8px !important;
+      margin-bottom: 5px !important;
+    }}
+    .memo-heading-box {{
+      font-size: 10px !important;
+      padding: 2px 12px !important;
+    }}
+    .shop-title {{
+      font-size: 15.5px !important;
+    }}
+    .party-name-line {{
+      font-size: 12px !important;
+      margin-bottom: 2px !important;
+    }}
+    .party-meta-grid {{
+      margin-bottom: 5px !important;
+      gap: 8px !important;
+    }}
+    .party-card, .meta-card {{
+      padding: 5px 8px !important;
+      font-size: 9.2px !important;
+    }}
+    .meta-row {{
+      padding: 1.5px 0 !important;
+      font-size: 9.2px !important;
+    }}
+    .settlement-grid {{
+      margin-bottom: 6px !important;
+      gap: 8px !important;
+    }}
+    .settlement-table td {{
+      padding: 3px 6px !important;
+      font-size: 9.5px !important;
+    }}
+    .words-box {{
+      padding: 6px 8px !important;
+      margin-bottom: 6px !important;
+    }}
+    .status-banner {{
+      padding: 5px 8px !important;
+      font-size: 10px !important;
+    }}
+    .footer-sign {{
+      margin-top: 10px !important;
+      margin-bottom: 5px !important;
       page-break-inside: avoid !important;
     }}
-    th {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    .total-row td {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    .st-grand td {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    table {{ font-size: 9.5px !important; margin-bottom: 8px !important; }}
-    th, td {{ padding: 3px 5px !important; }}
-    .memo-heading-box {{ font-size: 11px !important; padding: 3px 14px !important; }}
-    .shop-title {{ font-size: 17px !important; }}
-    .party-name-line {{ font-size: 13.5px !important; }}
-    .footer-sign {{ margin-top: 14px !important; margin-bottom: 8px !important; page-break-inside: avoid !important; }}
-    .sign-space {{ height: 38px !important; }}
-    .bottom-notes-bar {{ margin-top: 0 !important; padding: 5px 8px !important; }}
-    .fat-snf-col[style*="display: none"], .fat-snf-col[style*="display:none"] {{ display: none !important; }}
-    tr {{ page-break-inside: avoid; }}
-    thead {{ display: table-header-group; }}
+    .sign-space {{
+      height: 26px !important;
+    }}
+    .sign-label {{
+      font-size: 9.5px !important;
+    }}
+    .bottom-notes-bar {{
+      margin-top: 0 !important;
+      padding: 3px 6px !important;
+    }}
+    .thank-msg {{
+      font-size: 9.5px !important;
+    }}
+    .fat-snf-col[style*="display: none"], .fat-snf-col[style*="display:none"] {{
+      display: none !important;
+    }}
+    tr {{
+      page-break-inside: avoid;
+    }}
+    thead {{
+      display: table-header-group;
+    }}
   }}
 </style>
 </head>
