@@ -6147,7 +6147,7 @@ def build_bill_html(
   <!-- 6. Thanking Note AT THE VERY END OF THE PAGE -->
   <div class="bottom-notes-bar">
     <div class="thank-msg">
-      🙏 <b>धन्यवाद! आम्ही आपल्या सहकार्याबद्दल आभारी आहोत. / Thank You for Your Business!</b> &nbsp;|&nbsp; For queries / daily supply: <b>{esc(shop_contact)}</b>
+      🙏 <b>धन्यवाद! आम्ही आपल्या सहकार्याबद्दल आभारी आहोत. / Thank You for Your Business!</b> &nbsp;|&nbsp; <br/> For queries / daily supply: <b>{esc(shop_contact)}</b>
     </div>
   </div>
 
