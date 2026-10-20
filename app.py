@@ -5756,6 +5756,10 @@ def build_bill_html(
     background: #ffffff;
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
     margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    min-height: 297mm;
+    box-sizing: border-box;
   }}
 
   /* Print Button Bar with Column Toggle */
@@ -5979,10 +5983,16 @@ def build_bill_html(
     color: {status_color};
   }}
 
+  /* Bottom Docked Section (Dual Signatures + Thanking Note) */
+  .bill-bottom-group {{
+    margin-top: auto;
+    page-break-inside: avoid;
+  }}
+
   /* Signatures with Dedicated Line & Space */
   .footer-sign {{
-    margin-top: 32px;
-    margin-bottom: 16px;
+    margin-top: 24px;
+    margin-bottom: 14px;
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
@@ -6009,7 +6019,7 @@ def build_bill_html(
 
   /* Thanking Bar at the Very End */
   .bottom-notes-bar {{
-    margin-top: 14px;
+    margin-top: 0;
     border: 1.5px solid #94a3b8;
     border-radius: 6px;
     background: #f8fafc;
@@ -6024,9 +6034,33 @@ def build_bill_html(
 
   @media print {{
     @page {{ size: A4 portrait; margin: 5mm 6mm; }}
-    body {{ margin: 0; padding: 0; max-width: 100%; font-size: 9.5px !important; line-height: 1.25 !important; background: #fff !important; }}
+    html, body {{
+      height: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }}
+    body {{
+      max-width: 100% !important;
+      font-size: 9.5px !important;
+      line-height: 1.25 !important;
+      background: #fff !important;
+    }}
     .print-btn-bar {{ display: none !important; }}
-    .bill-page-wrapper {{ border: 1.5px solid #0f172a !important; border-radius: 4px !important; padding: 10px 12px !important; box-shadow: none !important; margin-bottom: 0 !important; }}
+    .bill-page-wrapper {{
+      border: 1.5px solid #0f172a !important;
+      border-radius: 4px !important;
+      padding: 10px 12px !important;
+      box-shadow: none !important;
+      margin-bottom: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      min-height: 280mm !important;
+      box-sizing: border-box !important;
+    }}
+    .bill-bottom-group {{
+      margin-top: auto !important;
+      page-break-inside: avoid !important;
+    }}
     th {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     .total-row td {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     .st-grand td {{ background: #0f172a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
@@ -6035,9 +6069,9 @@ def build_bill_html(
     .memo-heading-box {{ font-size: 11px !important; padding: 3px 14px !important; }}
     .shop-title {{ font-size: 17px !important; }}
     .party-name-line {{ font-size: 13.5px !important; }}
-    .footer-sign {{ margin-top: 24px !important; margin-bottom: 10px !important; page-break-inside: avoid; }}
+    .footer-sign {{ margin-top: 14px !important; margin-bottom: 8px !important; page-break-inside: avoid !important; }}
     .sign-space {{ height: 38px !important; }}
-    .bottom-notes-bar {{ margin-top: 8px !important; padding: 5px 8px !important; }}
+    .bottom-notes-bar {{ margin-top: 0 !important; padding: 5px 8px !important; }}
     .fat-snf-col[style*="display: none"], .fat-snf-col[style*="display:none"] {{ display: none !important; }}
     tr {{ page-break-inside: avoid; }}
     thead {{ display: table-header-group; }}
@@ -6130,24 +6164,27 @@ def build_bill_html(
     </div>
   </div>
 
-  <!-- 5. Dual Signatures with Dedicated Signing Line & Space -->
-  <div class="footer-sign">
-    <div class="sign-box">
-      <div class="sign-space"></div>
-      <div class="sign-line"></div>
-      <div class="sign-label">Customer / Receiver Signature</div>
+  <!-- 5 & 6. Bottom Docked Group: Dual Signatures & Thanking Note (Always pinned to bottom of page) -->
+  <div class="bill-bottom-group">
+    <!-- 5. Dual Signatures with Dedicated Signing Line & Space -->
+    <div class="footer-sign">
+      <div class="sign-box">
+        <div class="sign-space"></div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Customer / Receiver Signature</div>
+      </div>
+      <div class="sign-box">
+        <div class="sign-space"></div>
+        <div class="sign-line"></div>
+        <div class="sign-label">For <b>RANJIT BHIMRAO KAWLE MILK SUPPLIER</b><br/><span style="font-size:10px; font-weight:600; color:#475569;">(Authorized Signatory)</span></div>
+      </div>
     </div>
-    <div class="sign-box">
-      <div class="sign-space"></div>
-      <div class="sign-line"></div>
-      <div class="sign-label">For <b>RANJIT BHIMRAO KAWLE MILK SUPPLIER</b><br/><span style="font-size:10px; font-weight:600; color:#475569;">(Authorized Signatory)</span></div>
-    </div>
-  </div>
 
-  <!-- 6. Thanking Note AT THE VERY END OF THE PAGE -->
-  <div class="bottom-notes-bar">
-    <div class="thank-msg">
-      🙏 <b>धन्यवाद! आम्ही आपल्या सहकार्याबद्दल आभारी आहोत. / Thank You for Your Business!</b> &nbsp;|&nbsp; <br/> For queries / daily supply: <b>{esc(shop_contact)}</b>
+    <!-- 6. Thanking Note AT THE VERY END OF THE PAGE -->
+    <div class="bottom-notes-bar">
+      <div class="thank-msg">
+        🙏 <b>धन्यवाद! आम्ही आपल्या सहकार्याबद्दल आभारी आहोत. / Thank You for Your Business!</b> &nbsp;|&nbsp; <br/> For queries / daily supply: <b>{esc(shop_contact)}</b>
+      </div>
     </div>
   </div>
 
