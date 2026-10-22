@@ -5758,7 +5758,7 @@ def build_bill_html(
     margin-bottom: 24px;
     display: flex;
     flex-direction: column;
-    min-height: auto;
+    min-height: 272mm;
     box-sizing: border-box;
   }}
 
@@ -6053,14 +6053,13 @@ def build_bill_html(
       margin: 0 !important;
       display: flex !important;
       flex-direction: column !important;
-      min-height: auto !important;
-      height: auto !important;
+      min-height: 272mm !important;
       box-sizing: border-box !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
     }}
     .bill-bottom-group {{
-      margin-top: 10px !important;
+      margin-top: auto !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
     }}
