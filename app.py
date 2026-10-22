@@ -5752,13 +5752,13 @@ def build_bill_html(
   .bill-page-wrapper {{
     border: 2px solid #0f172a;
     border-radius: 8px;
-    padding: 20px 22px;
+    padding: 18px 20px;
     background: #ffffff;
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
     margin-bottom: 24px;
     display: flex;
     flex-direction: column;
-    min-height: 272mm;
+    min-height: 250mm;
     box-sizing: border-box;
   }}
 
@@ -6050,10 +6050,10 @@ def build_bill_html(
       border-radius: 4px !important;
       padding: 6px 8px !important;
       box-shadow: none !important;
-      margin: 0 !important;
+      margin: 0 auto !important;
       display: flex !important;
       flex-direction: column !important;
-      min-height: 272mm !important;
+      min-height: 250mm !important;
       box-sizing: border-box !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
