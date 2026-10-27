@@ -5599,7 +5599,8 @@ def build_bill_html(
                 pd.to_numeric(df["Payment (₹)"], errors="coerce").fillna(0.0).sum()
             )
 
-    closing_due = float(opening_due + total_sales - total_pay)
+    total_gross_due = float(opening_due + total_sales)
+    closing_due = float(total_gross_due - total_pay)
 
     # Active categories taken by the retailer (strictly those purchased or assigned)
     active_cats = [c for c in cat_names if total_qty_by_cat.get(c, 0.0) > 0]
@@ -6221,6 +6222,10 @@ def build_bill_html(
         <tr>
           <td class="st-lbl">Current Period Sales:</td>
           <td class="st-val">₹{total_sales:,.2f}</td>
+        </tr>
+        <tr style="background:#f1f5f9;">
+          <td class="st-lbl" style="font-weight:750;">Total Amount Due:</td>
+          <td class="st-val" style="font-weight:800;">₹{total_gross_due:,.2f}</td>
         </tr>
         <tr>
           <td class="st-lbl" style="color:#15803d;">Less: Payments Received:</td>
