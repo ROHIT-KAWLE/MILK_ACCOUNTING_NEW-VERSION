@@ -4024,16 +4024,37 @@ def cached_opening_balances(retailer_ids: tuple, as_of_day, data_version: int) -
 
     e_df = None
     p_df = None
-    try:
-        if "entries" in globals() and isinstance(globals()["entries"], pd.DataFrame) and not globals()["entries"].empty:
-            e_df = globals()["entries"]
-    except Exception:
-        pass
-    try:
-        if "payments" in globals() and isinstance(globals()["payments"], pd.DataFrame) and not globals()["payments"].empty:
-            p_df = globals()["payments"]
-    except Exception:
-        pass
+
+    # Authoritative direct DB fetch for targeted retailer queries (e.g. single customer bill generation)
+    # to guarantee 100% exact mathematical balance, completely immune to in-memory startup chunk drops.
+    if USE_SERVER_FILTERS and len(rids) <= 100:
+        try:
+            e_df = sb_fetch_df(
+                ENTRIES_FILE,
+                CSV_SCHEMAS[ENTRIES_FILE],
+                filters=[("retailer_id", "in", rids), ("date", "lt", str(as_of_day))],
+            )
+            p_df = sb_fetch_df(
+                PAYMENTS_FILE,
+                CSV_SCHEMAS[PAYMENTS_FILE],
+                filters=[("retailer_id", "in", rids), ("date", "lt", str(as_of_day))],
+            )
+        except Exception:
+            e_df = None
+            p_df = None
+
+    if e_df is None:
+        try:
+            if "entries" in globals() and isinstance(globals()["entries"], pd.DataFrame) and not globals()["entries"].empty:
+                e_df = globals()["entries"]
+        except Exception:
+            pass
+    if p_df is None:
+        try:
+            if "payments" in globals() and isinstance(globals()["payments"], pd.DataFrame) and not globals()["payments"].empty:
+                p_df = globals()["payments"]
+        except Exception:
+            pass
 
     if e_df is None and os.path.exists(ENTRIES_FILE):
         try:
