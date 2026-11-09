@@ -4027,7 +4027,7 @@ def cached_opening_balances(retailer_ids: tuple, as_of_day, data_version: int) -
 
     # Authoritative direct DB fetch for targeted retailer queries (e.g. single customer bill generation)
     # to guarantee 100% exact mathematical balance, completely immune to in-memory startup chunk drops.
-    if USE_SERVER_FILTERS and len(rids) <= 100:
+    if USE_SERVER_FILTERS and len(rids) <= 3:
         try:
             e_df = sb_fetch_df(
                 ENTRIES_FILE,
@@ -4502,7 +4502,8 @@ def _main_table_exists() -> bool:
         return False
 
 
-def get_main_retailer_ids() -> list[int]:
+@st.cache_data(show_spinner=False, ttl=300)
+def get_main_retailer_ids(data_version: int = 0) -> list[int]:
     """Return retailer_ids configured for Main book (no caching; single-user friendly)."""
     if not _main_table_exists():
         return []
@@ -5996,13 +5997,13 @@ def build_bill_html(
   .bill-page-wrapper {{
     border: 2px solid #0f172a;
     border-radius: 8px;
-    padding: 18px 20px;
+    padding: 14px 16px;
     background: #ffffff;
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.08);
     margin-bottom: 24px;
     display: flex;
     flex-direction: column;
-    min-height: 250mm;
+    min-height: 235mm;
     box-sizing: border-box;
   }}
 
@@ -6292,15 +6293,19 @@ def build_bill_html(
     .bill-page-wrapper {{
       border: 1.5px solid #0f172a !important;
       border-radius: 4px !important;
-      padding: 6px 8px !important;
+      padding: 4px 6px !important;
       box-shadow: none !important;
       margin: 0 auto !important;
       display: flex !important;
       flex-direction: column !important;
-      min-height: 250mm !important;
+      min-height: 230mm !important;
+      max-height: 265mm !important;
+      height: 98% !important;
       box-sizing: border-box !important;
       page-break-inside: avoid !important;
       break-inside: avoid !important;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
     }}
     .bill-bottom-group {{
       margin-top: auto !important;
@@ -7229,7 +7234,16 @@ def make_range_backup_excel(
 
 current_menu = st.session_state["current_menu"]
 
+def is_app_saving_locked() -> bool:
+    return bool(
+        st.session_state.get("is_saving_active", False)
+        or st.session_state.get("daily_save_lock", False)
+    )
+
 def switch_nav_target(target_id: str):
+    if is_app_saving_locked():
+        st.toast("⏳ डेटा सेव्ह होत आहे! सेव्ह पूर्ण होईपर्यंत इतर पानावर जाता येणार नाही. (Save is in progress. Navigation is locked.)", icon="🔒")
+        return
     if st.session_state.get("current_menu") != target_id:
         st.session_state["current_menu"] = target_id
         st.session_state["daily_drafts"] = {}
@@ -7261,6 +7275,7 @@ with st.container(border=True, key="top_nav_deck"):
                 key=item["key"],
                 type="primary" if is_active else "secondary",
                 use_container_width=True,
+                disabled=is_app_saving_locked(),
                 help=f"Open {item['id']}",
             ):
                 switch_nav_target(item["id"])
@@ -7280,6 +7295,7 @@ with st.container(border=True, key="top_nav_deck"):
                 key=item["key"],
                 type="primary" if is_active else "secondary",
                 use_container_width=True,
+                disabled=is_app_saving_locked(),
                 help=f"Open {item['id']}",
             ):
                 switch_nav_target(item["id"])
@@ -7308,6 +7324,7 @@ if menu == "🧾 Bills & Statements":
                 key="subnav_btn_ret_bill",
                 type="primary" if b1_active else "secondary",
                 use_container_width=True,
+                disabled=is_app_saving_locked(),
             ):
                 if st.session_state["current_bill_menu"] != "🏪 Retailers Bill":
                     st.session_state["current_bill_menu"] = "🏪 Retailers Bill"
@@ -7319,6 +7336,7 @@ if menu == "🧾 Bills & Statements":
                 key="subnav_btn_dist_bill",
                 type="primary" if b2_active else "secondary",
                 use_container_width=True,
+                disabled=is_app_saving_locked(),
             ):
                 if st.session_state["current_bill_menu"] != "🚚 Distributor Procurement Bill":
                     st.session_state["current_bill_menu"] = "🚚 Distributor Procurement Bill"
@@ -7614,61 +7632,7 @@ if menu == "📊 Dashboard":
         main_pivot = main_pivot.reindex(columns=cat_names, fill_value=0.0)
         main_pivot["TOTAL (L)"] = main_pivot[cat_names].sum(axis=1).astype(float)
 
-    # ---- Main book retailer rows ----
-    main_ids = set(get_main_retailer_ids())
-    main_pivot = pd.DataFrame()
-    main_sales_map = {}
-    main_pay_map = {}
-    main_r = pd.DataFrame(columns=["retailer_id", "name"])
 
-    if main_ids and (not rmap.empty):
-        main_r = rmap.loc[rmap["retailer_id"].astype(int).isin(list(main_ids))].copy()
-
-        if not main_r.empty and not e_day.empty:
-            e_main = e_day.loc[
-                e_day["retailer_id"].astype(int).isin(main_r["retailer_id"].astype(int))
-            ].copy()
-            e_main = e_main.merge(
-                main_r[["retailer_id", "name"]], on="retailer_id", how="left"
-            ).rename(columns={"name": "Retailer"})
-            e_main = e_main.loc[e_main["Category"].astype(str).str.len() > 0].copy()
-            if not e_main.empty:
-                main_pivot = cached_pivot(
-                    e_main,
-                    index="Retailer",
-                    columns="Category",
-                    values="qty",
-                    data_version=version,
-                )
-                tmp = cached_groupby_sum(
-                    e_main,
-                    ["Retailer"],
-                    "amount",
-                    version,
-                )
-                main_sales_map = dict(zip(tmp["Retailer"], tmp["amount"]))
-
-        if not p_day.empty and not main_r.empty:
-            p_main = p_day.loc[
-                p_day["retailer_id"].astype(int).isin(main_r["retailer_id"].astype(int))
-            ].copy()
-            if not p_main.empty:
-                p_main = p_main.merge(
-                    main_r[["retailer_id", "name"]], on="retailer_id", how="left"
-                )
-                tmp = cached_groupby_sum(
-                    p_main,
-                    ["name"],
-                    "amount",
-                    version,
-                )
-                main_pay_map = dict(zip(tmp["name"], tmp["amount"]))
-    if not main_pivot.empty:
-        for c in cat_names:
-            if c not in main_pivot.columns:
-                main_pivot[c] = 0.0
-        main_pivot = main_pivot.reindex(columns=cat_names, fill_value=0.0)
-        main_pivot["TOTAL (L)"] = main_pivot.sum(axis=1)
 
     # ---- Ledgers ----
     opening_by_rid = {}
@@ -9818,11 +9782,24 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
     save_wastage_action = bool(locals().get("do_save_wastage", False))
 
     if save_retailers_action or save_distributors_action or save_wastage_action:
-        if st.session_state.get("daily_save_lock", False):
+        if st.session_state.get("daily_save_lock", False) or st.session_state.get("is_saving_active", False):
             st.warning("⚠️ Save already in progress. Please wait.")
             st.stop()
 
         st.session_state["daily_save_lock"] = True
+        st.session_state["is_saving_active"] = True
+
+        daily_save_overlay = st.empty()
+        daily_save_overlay.markdown("""
+        <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999;
+                    background:rgba(15,23,42,0.65); backdrop-filter:blur(4px);
+                    display:flex; flex-direction:column; align-items:center; justify-content:center;
+                    color:#ffffff; font-family:sans-serif; text-align:center; pointer-events:all;">
+          <div style="font-size:42px; margin-bottom:12px;">⏳</div>
+          <div style="font-size:22px; font-weight:900; letter-spacing:0.5px;">डेटा सुरक्षित सेव्ह होत आहे...</div>
+          <div style="font-size:15px; color:#93c5fd; font-weight:700; margin-top:6px;">Saving daily entries to database. Navigation locked. Please wait.</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         try:
             saved_parts = []
@@ -10059,6 +10036,11 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
 
         finally:
             st.session_state["daily_save_lock"] = False
+            st.session_state["is_saving_active"] = False
+            try:
+                daily_save_overlay.empty()
+            except Exception:
+                pass
 
 # ============================================================
 # PAGE: 👷 कामगार हजेरी (ATTENDANCE)
@@ -13081,60 +13063,98 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
         single_r_edit_df = single_r_edit_df[[c for c in full_col_order if c in single_r_edit_df.columns]]
 
-        ed_key = f"single_retailer_editor_{rid}_{ed_start_day}_{ed_end_day}_{st.session_state.get('data_version', 0)}"
-        edited_single_r = st.data_editor(
-            single_r_edit_df,
-            column_order=display_col_order,
-            column_config=col_config,
-            use_container_width=True,
-            num_rows="fixed",
-            key=ed_key,
-        )
-
-        b_col1, b_col2 = st.columns([3, 4], vertical_alignment="center")
-        with b_col1:
-            do_save_single_r = st.button(
-                f"💾 Save Changes for {retailer_name}",
-                type="primary",
+        with st.form(f"single_r_form_{rid}_{ed_start_day}_{ed_end_day}", border=False):
+            ed_key = f"single_retailer_editor_{rid}_{ed_start_day}_{ed_end_day}_{st.session_state.get('data_version', 0)}"
+            edited_single_r = st.data_editor(
+                single_r_edit_df,
+                column_order=display_col_order,
+                column_config=col_config,
                 use_container_width=True,
-                key=f"btn_save_single_r_{rid}",
-                help="Applies only the modified cells directly into the database and refreshes the bill.",
+                num_rows="fixed",
+                key=ed_key,
             )
 
+            b_col1, b_col2 = st.columns([3, 4], vertical_alignment="center")
+            with b_col1:
+                do_save_single_r = st.form_submit_button(
+                    f"💾 Save Changes for {retailer_name}",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=is_app_saving_locked(),
+                    help="Applies only the modified cells directly into the database and refreshes the bill.",
+                )
+
         if do_save_single_r and edited_single_r is not None and not edited_single_r.empty:
-            total_e_upd, total_e_ins, total_e_del = 0, 0, 0
-            total_p_upd, total_p_ins, total_p_del = 0, 0, 0
+            # 1. Delta check in-memory to find ONLY days that were actually modified
+            changed_rows = []
+            check_cols = [cm["col"] for cm in editor_cat_cols] + [f"{m_name} ₹" for m_name in PAYMENT_MODES]
+            for idx, new_row in edited_single_r.iterrows():
+                orig_row = single_r_edit_df.loc[idx] if idx in single_r_edit_df.index else None
+                has_diff = False
+                if orig_row is None:
+                    has_diff = True
+                else:
+                    for c in check_cols:
+                        v_new = float(pd.to_numeric(new_row.get(c, 0.0), errors="coerce") or 0.0)
+                        v_orig = float(pd.to_numeric(orig_row.get(c, 0.0), errors="coerce") or 0.0)
+                        if abs(v_new - v_orig) > 1e-5:
+                            has_diff = True
+                            break
+                if has_diff:
+                    changed_rows.append(new_row)
 
-            for _, day_row in edited_single_r.iterrows():
-                d_val_str = str(day_row["Date"])
-                d_val_date = pd.to_datetime(d_val_str).date()
-                day_df = pd.DataFrame([day_row])
-
-                diff_res = save_daily_entries_payments_diff(
-                    d=d_val_date,
-                    affected_rids=[int(rid)],
-                    edited_df=day_df,
-                    cat_cols=editor_cat_cols,
-                    sb=get_sb(),
-                )
-                total_e_upd += diff_res["entries_updated"]
-                total_e_ins += diff_res["entries_inserted"]
-                total_e_del += diff_res["entries_deleted"]
-                total_p_upd += diff_res["payments_updated"]
-                total_p_ins += diff_res["payments_inserted"]
-                total_p_del += diff_res["payments_deleted"]
-
-            all_ch = total_e_upd + total_e_ins + total_e_del + total_p_upd + total_p_ins + total_p_del
-            if all_ch > 0:
-                st.success(
-                    f"✅ Saved successfully for {retailer_name}!\n\n"
-                    f"• Milk entries: {total_e_upd} updated, {total_e_ins} added, {total_e_del} removed\n"
-                    f"• Payments: {total_p_upd} updated, {total_p_ins} added, {total_p_del} removed\n\n"
-                    f"Bill recalculating..."
-                )
-                st.rerun()
+            if not changed_rows:
+                st.info("ℹ️ कोणतीही दुरुस्ती केलेली नाही. डेटा आधीच अद्ययावत आहे. (No changes were detected. Data is already up-to-date.)")
             else:
-                st.info("ℹ️ No changes were detected. Data is already up-to-date.")
+                st.session_state["is_saving_active"] = True
+                save_overlay = st.empty()
+                save_overlay.markdown("""
+                <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999;
+                            background:rgba(15,23,42,0.65); backdrop-filter:blur(4px);
+                            display:flex; flex-direction:column; align-items:center; justify-content:center;
+                            color:#ffffff; font-family:sans-serif; text-align:center; pointer-events:all;">
+                  <div style="font-size:42px; margin-bottom:12px;">⏳</div>
+                  <div style="font-size:22px; font-weight:900; letter-spacing:0.5px;">डेटा सुरक्षित सेव्ह होत आहे...</div>
+                  <div style="font-size:15px; color:#93c5fd; font-weight:700; margin-top:6px;">Saving data securely to database. Please do not click or navigate away.</div>
+                </div>
+                """, unsafe_allow_html=True)
+                total_e_upd, total_e_ins, total_e_del = 0, 0, 0
+                total_p_upd, total_p_ins, total_p_del = 0, 0, 0
+
+                try:
+                    for day_row in changed_rows:
+                        d_val_str = str(day_row["Date"])
+                        d_val_date = pd.to_datetime(d_val_str).date()
+                        day_df = pd.DataFrame([day_row])
+
+                        diff_res = save_daily_entries_payments_diff(
+                            d=d_val_date,
+                            affected_rids=[int(rid)],
+                            edited_df=day_df,
+                            cat_cols=editor_cat_cols,
+                            sb=get_sb(),
+                        )
+                        total_e_upd += diff_res["entries_updated"]
+                        total_e_ins += diff_res["entries_inserted"]
+                        total_e_del += diff_res["entries_deleted"]
+                        total_p_upd += diff_res["payments_updated"]
+                        total_p_ins += diff_res["payments_inserted"]
+                        total_p_del += diff_res["payments_deleted"]
+                finally:
+                    st.session_state["is_saving_active"] = False
+                    save_overlay.empty()
+
+                all_ch = total_e_upd + total_e_ins + total_e_del + total_p_upd + total_p_ins + total_p_del
+                if all_ch > 0:
+                    st.success(
+                        f"✅ Saved successfully for {retailer_name}!\n\n"
+                        f"• Milk entries: {total_e_upd} updated, {total_e_ins} added, {total_e_del} removed\n"
+                        f"• Payments: {total_p_upd} updated, {total_p_ins} added, {total_p_del} removed\n\n"
+                        f"Bill recalculating..."
+                    )
+                    st.rerun()
+                else:
+                    st.info("ℹ️ No changes were detected. Data is already up-to-date.")
 
 # ============================================================
 # PAGE: 🛡️ DATA HEALTH & BACKUP
