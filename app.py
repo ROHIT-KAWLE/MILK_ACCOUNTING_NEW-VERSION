@@ -11649,6 +11649,28 @@ elif menu == "💰 Price Management":
         )
 
     with st.form(f"price_matrix_form_{eff_date}_{selected_route}", clear_on_submit=False):
+        c_tick1, c_tick2 = st.columns([2.5, 1.5], vertical_alignment="center")
+        with c_tick1:
+            apply_to_future = st.checkbox(
+                "✅ पुढील सर्व तारखांसाठी हा दर कायम लागू करा (Apply price to ALL further dates onwards)",
+                value=True,
+                key=f"price_tick_future_{eff_date}_{selected_route}",
+                help="Checked (✓): या तारखेपासून पुढील सर्व दिवसांच्या डिलिव्हरीसाठी हा नवीन दर कायम राहील (Applies to this date and all future dates).\nUnchecked: फक्त याच एका दिवसासाठी हा दर लागू राहील; दुसऱ्या दिवसापासून आपोआप जुना नेहमीचा दर सुरू राहील (Single-day only).",
+            )
+        with c_tick2:
+            if apply_to_future:
+                st.markdown(
+                    "<span style='background:#dcfce7; color:#166534; font-weight:700; padding:4px 10px; border-radius:6px; font-size:13px; display:inline-block;'>"
+                    "🟢 कायमस्वरूपी दर (All Future Dates)</span>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    "<span style='background:#fef3c7; color:#92400e; font-weight:700; padding:4px 10px; border-radius:6px; font-size:13px; display:inline-block;'>"
+                    "🟡 फक्त एका दिवसाचा दर (Single-Day Only)</span>",
+                    unsafe_allow_html=True,
+                )
+
         edited_df = st.data_editor(
             display_df,
             column_config=column_config,
@@ -11658,118 +11680,188 @@ elif menu == "💰 Price Management":
         )
 
         st.markdown("---")
-        retroactive_recalc = st.checkbox(
-            "🔄 Also update existing daily entry amounts from this Effective Date onwards (Retroactive Recalculation)",
-            value=False,
-            help="If enabled, existing deliveries recorded on or after this Effective Date will have their rates and total amounts updated to match these revised prices.",
-        )
-
-        save_price_btn = st.form_submit_button("💾 Save Price Changes", type="primary", use_container_width=True)
+        c_save1, c_save2 = st.columns([2.5, 1.5], vertical_alignment="center")
+        with c_save1:
+            if apply_to_future:
+                st.caption(f"ℹ️ **लागू नियम:** टिक चालू आहे (✓). हा दर **{eff_date.strftime('%d/%m/%Y')}** पासून पुढील सर्व दिवसांसाठी कायम लागू होईल.")
+            else:
+                st.caption(f"ℹ️ **लागू नियम:** टिक बंद आहे. हा दर **फक्त {eff_date.strftime('%d/%m/%Y')}** एकाच दिवसासाठी राहील, दुसऱ्या दिवसापासून जुना दर आपोआप लागू राहील.")
+        with c_save2:
+            save_price_btn = st.form_submit_button("💾 Save Price Changes", type="primary", use_container_width=True)
 
     if save_price_btn:
-        updates = []
-        changed_pairs = []
-
+        changed_items = []
         for i, row in edited_df.iterrows():
             rid = int(price_matrix_df.iloc[i]["retailer_id"])
-
             for _, c in category_list.iterrows():
                 cid = int(c["category_id"])
                 col = c["name"]
-                new_price = float(row[col] or 0.0)
-                old_price = get_price_for_date(rid, cid, eff_date)
-                if old_price is None:
-                    old_price = 0.0
+                new_p = round(float(pd.to_numeric(row[col], errors="coerce") or 0.0), 2)
+                old_p = round(float(get_price_for_date(rid, cid, eff_date) or c.get("default_price", 0.0) or 0.0), 2)
+                if new_p > 0 and abs(new_p - old_p) > 0.001:
+                    changed_items.append({
+                        "retailer_id": rid,
+                        "category_id": cid,
+                        "new_price": new_p,
+                        "old_price": old_p,
+                    })
 
-                if round(float(new_price), 2) != round(float(old_price), 2):
-                    updates.append(
-                        {
+        if not changed_items:
+            st.info("ℹ️ कोणतीही किंमत बदललेली नाही. (No price changes detected.)")
+        else:
+            st.session_state["is_saving_active"] = True
+            save_overlay = st.empty()
+            save_overlay.markdown("""
+            <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999;
+                        background:rgba(15,23,42,0.65); backdrop-filter:blur(4px);
+                        display:flex; flex-direction:column; align-items:center; justify-content:center;
+                        color:#ffffff; font-family:sans-serif; text-align:center; pointer-events:all;">
+              <div style="font-size:42px; margin-bottom:12px;">⏳</div>
+              <div style="font-size:22px; font-weight:900;">किंमती सेव्ह होत आहेत...</div>
+              <div style="font-size:15px; color:#93c5fd; font-weight:700; margin-top:6px;">Saving price revisions securely. Please wait...</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            recalc_count = 0
+            try:
+                from datetime import timedelta
+                sb = get_sb()
+                rids = list({x["retailer_id"] for x in changed_items})
+                cids = list({x["category_id"] for x in changed_items})
+                eff_str = str(eff_date)
+                next_day_str = str(eff_date + timedelta(days=1))
+
+                # Query max price_id from DB
+                max_res = sb.table("prices").select("price_id").order("price_id", desc=True).limit(1).execute()
+                max_pid = int(max_res.data[0]["price_id"]) if max_res and max_res.data else 0
+
+                # Query existing prices for these retailers & categories in ONE fast call
+                existing_prices = sb_fetch_where(
+                    "prices",
+                    cols="price_id,retailer_id,category_id,price,effective_date",
+                    filters=[("retailer_id", "in", rids), ("category_id", "in", cids)],
+                )
+                ex_price_map = {}
+                for ep in (existing_prices or []):
+                    pid = int(ep.get("price_id") or 0)
+                    if pid > max_pid:
+                        max_pid = pid
+                    r_k = int(ep.get("retailer_id") or 0)
+                    c_k = int(ep.get("category_id") or 0)
+                    d_k = str(ep.get("effective_date") or "").strip()
+                    ex_price_map[(r_k, c_k, d_k)] = pid
+
+                price_upsert_rows = []
+                next_pid = max_pid + 1
+
+                for item in changed_items:
+                    rid = item["retailer_id"]
+                    cid = item["category_id"]
+                    new_p = item["new_price"]
+                    old_p = item["old_price"]
+
+                    # 1. Price record for eff_date
+                    pid_eff = ex_price_map.get((rid, cid, eff_str))
+                    if pid_eff is None:
+                        pid_eff = next_pid
+                        next_pid += 1
+                        ex_price_map[(rid, cid, eff_str)] = pid_eff
+
+                    price_upsert_rows.append({
+                        "price_id": pid_eff,
+                        "retailer_id": rid,
+                        "category_id": cid,
+                        "price": new_p,
+                        "effective_date": eff_str,
+                    })
+
+                    # 2. If single-day only (tick unchecked):
+                    # Ensure next day (eff_date + 1) restores the old regular price!
+                    if not apply_to_future:
+                        pid_next = ex_price_map.get((rid, cid, next_day_str))
+                        if pid_next is None:
+                            pid_next = next_pid
+                            next_pid += 1
+                            ex_price_map[(rid, cid, next_day_str)] = pid_next
+                        price_upsert_rows.append({
+                            "price_id": pid_next,
                             "retailer_id": rid,
                             "category_id": cid,
-                            "price": round(float(new_price), 2),
-                            "effective_date": str(eff_date),
-                        }
-                    )
-                    changed_pairs.append((rid, cid, round(float(new_price), 2)))
+                            "price": old_p,
+                            "effective_date": next_day_str,
+                        })
 
-        if updates:
-            for up in updates:
-                _r_id = int(up["retailer_id"])
-                _c_id = int(up["category_id"])
-                _pr = float(up["price"])
-                _ef = str(up["effective_date"])
+                # High-speed batch upsert to Supabase
+                for i in range(0, len(price_upsert_rows), 500):
+                    sb.table("prices").upsert(price_upsert_rows[i : i + 500], on_conflict="price_id").execute()
+
+                # Sync to local CSV
                 try:
-                    ex_q = (
-                        sb.table("prices")
-                        .select("price_id")
-                        .eq("retailer_id", _r_id)
-                        .eq("category_id", _c_id)
-                        .eq("effective_date", _ef)
-                        .limit(1)
-                        .execute()
-                    )
-                    if ex_q and getattr(ex_q, "data", None):
-                        _pid = ex_q.data[0]["price_id"]
-                        sb.table("prices").update({"price": _pr}).eq("price_id", _pid).execute()
-                    else:
-                        null_q = (
-                            sb.table("prices")
-                            .select("price_id")
-                            .eq("retailer_id", _r_id)
-                            .eq("category_id", _c_id)
-                            .is_("effective_date", "null")
-                            .limit(1)
-                            .execute()
-                        )
-                        if null_q and getattr(null_q, "data", None):
-                            _pid = null_q.data[0]["price_id"]
-                            sb.table("prices").update({"price": _pr, "effective_date": _ef}).eq("price_id", _pid).execute()
-                        else:
-                            new_rec = {
-                                "retailer_id": _r_id,
-                                "category_id": _c_id,
-                                "price": _pr,
-                                "effective_date": _ef,
-                            }
-                            _new_pid = sb_new_id("prices", "price_id")
-                            if _new_pid is not None:
-                                new_rec["price_id"] = _new_pid
-                            sb.table("prices").insert(new_rec).execute()
-                except Exception as _pex:
-                    print(f"[Price Save Error] retailer {_r_id}, cat {_c_id}: {_pex}")
+                    if os.path.exists(PRICES_FILE):
+                        loc_prices = pd.read_csv(PRICES_FILE)
+                        for up_row in price_upsert_rows:
+                            u_pid = up_row["price_id"]
+                            u_mask = loc_prices["price_id"] == u_pid if "price_id" in loc_prices.columns else pd.Series([False]*len(loc_prices))
+                            if u_mask.any():
+                                loc_prices.loc[u_mask, "price"] = up_row["price"]
+                                loc_prices.loc[u_mask, "effective_date"] = up_row["effective_date"]
+                            else:
+                                loc_prices = pd.concat([loc_prices, pd.DataFrame([up_row])], ignore_index=True)
+                        loc_prices.to_csv(PRICES_FILE, index=False)
+                except Exception:
+                    pass
 
-            # Optional retroactive entry recalculation
-            recalc_count = 0
-            if retroactive_recalc and changed_pairs:
-                for rid, cid, new_rate in changed_pairs:
-                    entries_to_update = sb_fetch_df(
-                        ENTRIES_FILE,
-                        CSV_SCHEMAS[ENTRIES_FILE],
-                        filters=[
-                            ("retailer_id", "eq", rid),
-                            ("category_id", "eq", cid),
-                            ("date", "gte", str(eff_date)),
-                        ],
+                # Update deliveries / entries (fast batch upsert)
+                try:
+                    date_filters = [("date", "eq", eff_str)] if not apply_to_future else [("date", "gte", eff_str)]
+                    entries_query_filters = [("retailer_id", "in", rids), ("category_id", "in", cids)] + date_filters
+                    affected_entries = sb_fetch_where(
+                        "entries",
+                        cols="entry_id,retailer_id,category_id,date,qty,rate,amount",
+                        filters=entries_query_filters,
                     )
-                    if not entries_to_update.empty:
-                        for _, erow in entries_to_update.iterrows():
-                            eid = int(erow["entry_id"])
-                            eqty = float(erow.get("qty", 0.0) or 0.0)
-                            new_amt = round(eqty * new_rate, 2)
-                            sb.table("entries").update(
-                                {"rate": new_rate, "amount": new_amt}
-                            ).eq("entry_id", eid).execute()
-                            recalc_count += 1
+                    entries_to_upsert = []
+                    changed_lookup = {(x["retailer_id"], x["category_id"]): x["new_price"] for x in changed_items}
+
+                    for erow in (affected_entries or []):
+                        r_id = int(erow["retailer_id"])
+                        c_id = int(erow["category_id"])
+                        new_rate = changed_lookup.get((r_id, c_id))
+                        if new_rate is not None:
+                            old_rate = float(erow.get("rate") or 0.0)
+                            if abs(new_rate - old_rate) > 0.001:
+                                qty = float(erow.get("qty") or 0.0)
+                                new_amt = round(qty * new_rate, 2)
+                                erow_upd = {
+                                    "entry_id": int(erow["entry_id"]),
+                                    "retailer_id": r_id,
+                                    "category_id": c_id,
+                                    "date": str(erow["date"]),
+                                    "qty": qty,
+                                    "rate": round(new_rate, 4),
+                                    "amount": new_amt,
+                                }
+                                entries_to_upsert.append(erow_upd)
+
+                    if entries_to_upsert:
+                        for i in range(0, len(entries_to_upsert), 500):
+                            sb.table("entries").upsert(entries_to_upsert[i : i + 500], on_conflict="entry_id").execute()
+                        recalc_count = len(entries_to_upsert)
+                except Exception as _ex:
+                    print(f"Retroactive recalculation non-fatal: {_ex}")
+
+            finally:
+                st.session_state["is_saving_active"] = False
+                save_overlay.empty()
 
             invalidate_data_cache()
             st.session_state[bulk_key] = {}
-            msg = f"✅ {len(updates)} prices successfully updated for Effective Date: {eff_date}!"
+            mode_lbl = "पुढील सर्व तारखांसाठी (All future dates)" if apply_to_future else "फक्त या एका दिवसासाठी (Single-day only)"
+            msg = f"✅ {len(changed_items)} किंमती यशस्वीरित्या सेव्ह झाल्या ({mode_lbl}, तारीख: {eff_date.strftime('%d/%m/%Y')})!"
             if recalc_count > 0:
-                msg += f" (Retroactively updated {recalc_count} existing daily delivery entries)."
+                msg += f"\n• {recalc_count} डिलिव्हरी नोंदींचे दर आणि रक्कम अद्ययावत झाली."
             st.success(msg)
             st.rerun()
-        else:
-            st.info("No price changes detected.")
 # ============================================================
 # PAGE: 📒 LEDGER
 # ============================================================
