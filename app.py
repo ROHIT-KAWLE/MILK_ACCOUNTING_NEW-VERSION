@@ -335,6 +335,15 @@ st.session_state.setdefault("daily_save_lock", False)
 
 
 def invalidate_data_cache():
+    try:
+        if "load_all_data" in globals() and hasattr(globals()["load_all_data"], "clear"):
+            globals()["load_all_data"].clear()
+    except Exception:
+        pass
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
     st.session_state["data_version"] = int(st.session_state.get("data_version", 0)) + 1
     # Purge in-memory draft states across all screens to guarantee zero stale data
     st.session_state["daily_drafts"] = {}
@@ -5404,12 +5413,12 @@ def get_workers_df() -> pd.DataFrame:
             df = pd.read_csv(WORKERS_FILE)
         except Exception:
             df = pd.DataFrame()
-    if df.empty:
+    if df.empty and not os.path.exists(WORKERS_FILE):
         try:
             df = sb_fetch_df(WORKERS_FILE, CSV_SCHEMAS[WORKERS_FILE])
         except Exception:
             df = pd.DataFrame()
-    if df.empty:
+    if df.empty and not os.path.exists(WORKERS_FILE):
         df = pd.DataFrame([
             {"worker_id": 1, "name": "Ramesh Yadav", "role": "Driver", "contact": "9820000001", "salary_type": "Daily", "base_rate": 500.0, "is_active": True},
             {"worker_id": 2, "name": "Suresh Gawali", "role": "Helper", "contact": "9820000002", "salary_type": "Daily", "base_rate": 400.0, "is_active": True},
@@ -5448,6 +5457,56 @@ def save_workers_df(df: pd.DataFrame) -> None:
     os.makedirs("data", exist_ok=True)
     df.to_csv(WORKERS_FILE, index=False)
     _sync_worker_table_to_supabase("workers", df, pk="worker_id")
+
+
+def delete_worker_fully(worker_id: int) -> bool:
+    """Permanently deletes a worker and removes their records from workers, worker_wages, and attendance."""
+    wid = int(worker_id)
+    # 1. Remove from workers DataFrame and CSV
+    cur_w = get_workers_df()
+    if not cur_w.empty and "worker_id" in cur_w.columns:
+        cur_w = cur_w[cur_w["worker_id"].astype(int) != wid]
+        os.makedirs("data", exist_ok=True)
+        cur_w.to_csv(WORKERS_FILE, index=False)
+    try:
+        sb = get_sb()
+        if sb is not None:
+            sb.table("workers").delete().eq("worker_id", wid).execute()
+    except Exception as e:
+        print(f"Supabase delete worker {wid} error: {e}")
+
+    # 2. Remove from worker_wages
+    cur_wages = get_worker_wages_df()
+    if not cur_wages.empty and "worker_id" in cur_wages.columns:
+        cur_wages = cur_wages[cur_wages["worker_id"].astype(int) != wid]
+        cur_wages.to_csv(WORKER_WAGES_FILE, index=False)
+    try:
+        sb = get_sb()
+        if sb is not None:
+            sb.table("worker_wages").delete().eq("worker_id", wid).execute()
+    except Exception as e:
+        print(f"Supabase delete worker_wages for worker {wid} error: {e}")
+
+    # 3. Remove from attendance
+    if os.path.exists(ATTENDANCE_FILE):
+        try:
+            att_df = pd.read_csv(ATTENDANCE_FILE)
+            if not att_df.empty and "worker_id" in att_df.columns:
+                att_df = att_df[att_df["worker_id"].astype(int) != wid]
+                att_df.to_csv(ATTENDANCE_FILE, index=False)
+        except Exception:
+            pass
+    try:
+        sb = get_sb()
+        if sb is not None:
+            sb.table("attendance").delete().eq("worker_id", wid).execute()
+    except Exception as e:
+        print(f"Supabase delete attendance for worker {wid} error: {e}")
+
+    # 4. Invalidate caches and clean session states
+    st.session_state.pop("workers_master_inline_editor", None)
+    invalidate_data_cache()
+    return True
 
 
 def parse_attendance_status_label(status_val, units_val=None) -> str:
@@ -7494,6 +7553,22 @@ if menu == "📊 Dashboard":
     if not e_day.empty:
         e_day["date"] = pd.to_datetime(e_day["date"], errors="coerce").dt.date
         e_day = e_day.loc[e_day["date"] == dash_day].copy()
+
+    # DB fallback if e_day is empty for this date (guarantees latest entries show immediately)
+    if e_day.empty and USE_SERVER_FILTERS:
+        rids = None
+        if selected_zone != "All Zones":
+            rids = _retailer_ids_for_zone(selected_zone)
+        e_filters = [("date", "eq", str(dash_day))]
+        if rids:
+            e_filters.append(("retailer_id", "in", rids))
+        e_day_db = sb_fetch_df(ENTRIES_FILE, CSV_SCHEMAS[ENTRIES_FILE], filters=e_filters)
+        if not e_day_db.empty:
+            e_day = e_day_db
+            e_day["date"] = pd.to_datetime(e_day["date"], errors="coerce").dt.date
+            e_day = e_day.loc[e_day["date"] == dash_day].copy()
+
+    if not e_day.empty:
         e_day["retailer_id"] = (
             pd.to_numeric(e_day.get("retailer_id", 0), errors="coerce")
             .fillna(0)
@@ -7525,6 +7600,22 @@ if menu == "📊 Dashboard":
     if not p_day.empty:
         p_day["date"] = pd.to_datetime(p_day["date"], errors="coerce").dt.date
         p_day = p_day.loc[p_day["date"] == dash_day].copy()
+
+    # DB fallback if p_day is empty for this date
+    if p_day.empty and USE_SERVER_FILTERS:
+        rids = None
+        if selected_zone != "All Zones":
+            rids = _retailer_ids_for_zone(selected_zone)
+        p_filters = [("date", "eq", str(dash_day))]
+        if rids:
+            p_filters.append(("retailer_id", "in", rids))
+        p_day_db = sb_fetch_df(PAYMENTS_FILE, CSV_SCHEMAS[PAYMENTS_FILE], filters=p_filters)
+        if not p_day_db.empty:
+            p_day = p_day_db
+            p_day["date"] = pd.to_datetime(p_day["date"], errors="coerce").dt.date
+            p_day = p_day.loc[p_day["date"] == dash_day].copy()
+
+    if not p_day.empty:
         p_day["retailer_id"] = (
             pd.to_numeric(p_day.get("retailer_id", 0), errors="coerce")
             .fillna(0)
@@ -7680,7 +7771,12 @@ if menu == "📊 Dashboard":
     if (not main_pivot.empty) and frames:
         frames.append(pd.DataFrame([{c: "–" for c in out_cols}]))
 
-    pass
+    if not main_pivot.empty:
+        mdf = main_pivot.copy().sort_index()
+        mdf["Payment (₹)"] = pd.Series(main_pay_map).reindex(mdf.index).fillna(0.0).astype(float)
+        mdf.insert(0, "Name", mdf.index.astype(str))
+        mdf = mdf.reset_index(drop=True)
+        frames.append(mdf[out_cols])
 
     if not zone_pivot.empty:
         grand = {"Name": "GRAND TOTAL"}
@@ -7724,6 +7820,19 @@ if menu == "📊 Dashboard":
     if not dp_day.empty:
         dp_day["date"] = pd.to_datetime(dp_day["date"], errors="coerce").dt.date
         dp_day = dp_day.loc[dp_day["date"] == dash_day].copy()
+
+    if dp_day.empty and USE_SERVER_FILTERS:
+        dp_day_db = sb_fetch_df(
+            DISTRIBUTOR_PURCHASES_FILE,
+            CSV_SCHEMAS[DISTRIBUTOR_PURCHASES_FILE],
+            filters=[("date", "eq", str(dash_day))],
+        )
+        if not dp_day_db.empty:
+            dp_day = dp_day_db
+            dp_day["date"] = pd.to_datetime(dp_day["date"], errors="coerce").dt.date
+            dp_day = dp_day.loc[dp_day["date"] == dash_day].copy()
+
+    if not dp_day.empty:
         dp_day["distributor_id"] = (
             pd.to_numeric(dp_day.get("distributor_id", 0), errors="coerce")
             .fillna(0)
@@ -7755,6 +7864,19 @@ if menu == "📊 Dashboard":
     if not dpay_day.empty:
         dpay_day["date"] = pd.to_datetime(dpay_day["date"], errors="coerce").dt.date
         dpay_day = dpay_day.loc[dpay_day["date"] == dash_day].copy()
+
+    if dpay_day.empty and USE_SERVER_FILTERS:
+        dpay_day_db = sb_fetch_df(
+            DISTRIBUTOR_PAYMENTS_FILE,
+            CSV_SCHEMAS[DISTRIBUTOR_PAYMENTS_FILE],
+            filters=[("date", "eq", str(dash_day))],
+        )
+        if not dpay_day_db.empty:
+            dpay_day = dpay_day_db
+            dpay_day["date"] = pd.to_datetime(dpay_day["date"], errors="coerce").dt.date
+            dpay_day = dpay_day.loc[dpay_day["date"] == dash_day].copy()
+
+    if not dpay_day.empty:
         dpay_day["distributor_id"] = (
             pd.to_numeric(dpay_day.get("distributor_id", 0), errors="coerce")
             .fillna(0)
@@ -10587,6 +10709,48 @@ th {{ background: #0f172a; color: #fff; }}
                         st.success(f"✅ '{w_name.strip()}' यशस्वीरित्या जोडले!")
                         st.rerun()
 
+        st.divider()
+
+        # Section 4: Delete Worker Permanently
+        st.markdown("#### 🗑️ कामगार कायमचा हटवा (Delete Worker Permanently)")
+        st.caption("कामगार, त्यांची सर्व हजेरी नोंदी आणि पगार इतिहास कायमचा काढून टाकण्यासाठी कामगार निवडा आणि पुष्टी करा.")
+
+        all_w_for_del = get_workers_df()
+        if all_w_for_del.empty:
+            st.info("कोणताही कामगार उपलब्ध नाही.")
+        else:
+            w_del_opts = {
+                int(r["worker_id"]): f"{r['name']} (ID: {r['worker_id']}, पद: {r.get('role', 'Staff')})"
+                for _, r in all_w_for_del.iterrows()
+            }
+            del_col1, del_col2 = st.columns([2, 1])
+            with del_col1:
+                sel_del_wid = st.selectbox(
+                    "हटवण्यासाठी कामगार निवडा (Select Worker to Delete)*",
+                    options=list(w_del_opts.keys()),
+                    format_func=lambda x: w_del_opts.get(x, f"ID: {x}"),
+                    key="worker_delete_select",
+                )
+                confirm_del = st.checkbox(
+                    f"मी पुष्टी करतो/करते की मला '{w_del_opts.get(sel_del_wid, '')}' यांचा सर्व डेटा कायमचा हटवायचा आहे.",
+                    key="worker_delete_confirm_chk",
+                )
+            with del_col2:
+                st.write("")
+                st.write("")
+                do_del_worker_btn = st.button(
+                    "🗑️ कामगार कायमचा हटवा (Delete Worker)",
+                    type="secondary",
+                    disabled=not confirm_del,
+                    use_container_width=True,
+                    key="btn_delete_worker_fully",
+                )
+                if do_del_worker_btn and confirm_del:
+                    w_name_deleted = w_del_opts.get(sel_del_wid, f"ID {sel_del_wid}")
+                    delete_worker_fully(sel_del_wid)
+                    st.success(f"✅ '{w_name_deleted}' यशस्वीरित्या कायमचा हटवला गेला!")
+                    st.rerun()
+
 # ============================================================
 # PAGE: 🤖 AI AUDIT & ANOMALY DETECTION (100% LOCAL / OFFLINE)
 # ============================================================
@@ -13002,7 +13166,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                 d_k = str(erow["date"])
                 c_k = int(pd.to_numeric(erow.get("category_id", 0), errors="coerce") or 0)
                 q_v = float(pd.to_numeric(erow.get("qty", 0.0), errors="coerce") or 0.0)
-                r_day_entries_map[(d_k, c_k)] = q_v
+                r_day_entries_map[(d_k, c_k)] = r_day_entries_map.get((d_k, c_k), 0.0) + q_v
 
         r_day_payments_map = {}
         if r_payments is not None and not r_payments.empty:
@@ -13146,6 +13310,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
                 all_ch = total_e_upd + total_e_ins + total_e_del + total_p_upd + total_p_ins + total_p_del
                 if all_ch > 0:
+                    invalidate_data_cache()
                     st.success(
                         f"✅ Saved successfully for {retailer_name}!\n\n"
                         f"• Milk entries: {total_e_upd} updated, {total_e_ins} added, {total_e_del} removed\n"
