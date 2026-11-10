@@ -272,6 +272,7 @@ WASTAGE_FILE = "data/wastage.csv"
 EXPENSES_FILE = "data/expenses.csv"
 WORKERS_FILE = "data/workers.csv"
 WORKER_ATTENDANCE_FILE = "data/worker_attendance.csv"
+ATTENDANCE_FILE = WORKER_ATTENDANCE_FILE
 ATTENDANCE_LOCKS_FILE = "data/attendance_date_locks.csv"
 WORKER_WAGES_FILE = "data/worker_wages.csv"
 
@@ -5460,7 +5461,7 @@ def save_workers_df(df: pd.DataFrame) -> None:
 
 
 def delete_worker_fully(worker_id: int) -> bool:
-    """Permanently deletes a worker and removes their records from workers, worker_wages, and attendance."""
+    """Permanently deletes a worker and removes their records from workers, worker_wages, and worker_attendance."""
     wid = int(worker_id)
     # 1. Remove from workers DataFrame and CSV
     cur_w = get_workers_df()
@@ -5473,38 +5474,42 @@ def delete_worker_fully(worker_id: int) -> bool:
         if sb is not None:
             sb.table("workers").delete().eq("worker_id", wid).execute()
     except Exception as e:
-        print(f"Supabase delete worker {wid} error: {e}")
+        print(f"Supabase delete worker {wid} non-fatal: {e}")
 
-    # 2. Remove from worker_wages
+    # 2. Remove from worker_wages (local-first CSV)
     cur_wages = get_worker_wages_df()
     if not cur_wages.empty and "worker_id" in cur_wages.columns:
         cur_wages = cur_wages[cur_wages["worker_id"].astype(int) != wid]
+        os.makedirs("data", exist_ok=True)
         cur_wages.to_csv(WORKER_WAGES_FILE, index=False)
     try:
         sb = get_sb()
         if sb is not None:
             sb.table("worker_wages").delete().eq("worker_id", wid).execute()
-    except Exception as e:
-        print(f"Supabase delete worker_wages for worker {wid} error: {e}")
+    except Exception:
+        pass
 
-    # 3. Remove from attendance
-    if os.path.exists(ATTENDANCE_FILE):
+    # 3. Remove from worker_attendance (both CSV and Supabase)
+    if os.path.exists(WORKER_ATTENDANCE_FILE):
         try:
-            att_df = pd.read_csv(ATTENDANCE_FILE)
+            att_df = pd.read_csv(WORKER_ATTENDANCE_FILE)
             if not att_df.empty and "worker_id" in att_df.columns:
                 att_df = att_df[att_df["worker_id"].astype(int) != wid]
-                att_df.to_csv(ATTENDANCE_FILE, index=False)
+                att_df.to_csv(WORKER_ATTENDANCE_FILE, index=False)
         except Exception:
             pass
     try:
         sb = get_sb()
         if sb is not None:
-            sb.table("attendance").delete().eq("worker_id", wid).execute()
+            sb.table("worker_attendance").delete().eq("worker_id", wid).execute()
     except Exception as e:
-        print(f"Supabase delete attendance for worker {wid} error: {e}")
+        print(f"Supabase delete worker_attendance for worker {wid} non-fatal: {e}")
 
     # 4. Invalidate caches and clean session states
     st.session_state.pop("workers_master_inline_editor", None)
+    for k in list(st.session_state.keys()):
+        if str(k).startswith("att_editor_"):
+            st.session_state.pop(k, None)
     invalidate_data_cache()
     return True
 
@@ -10748,6 +10753,8 @@ th {{ background: #0f172a; color: #fff; }}
                 if do_del_worker_btn and confirm_del:
                     w_name_deleted = w_del_opts.get(sel_del_wid, f"ID {sel_del_wid}")
                     delete_worker_fully(sel_del_wid)
+                    st.session_state.pop("worker_delete_select", None)
+                    st.session_state.pop("worker_delete_confirm_chk", None)
                     st.success(f"✅ '{w_name_deleted}' यशस्वीरित्या कायमचा हटवला गेला!")
                     st.rerun()
 
