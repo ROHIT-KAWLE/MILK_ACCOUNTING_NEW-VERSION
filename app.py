@@ -5611,6 +5611,11 @@ def save_attendance_matrix(year: int, month: int, matrix_df: pd.DataFrame) -> No
     records = []
     for _, row in matrix_df.iterrows():
         wid = int(pd.to_numeric(row.get("worker_id", 0), errors="coerce") or 0)
+        if wid <= 0 and hasattr(row, "name"):
+            import re
+            m = re.search(r"#(\d+)", str(row.name))
+            if m:
+                wid = int(m.group(1))
         if wid <= 0:
             continue
         for d in range(1, days_in_month + 1):
@@ -9127,7 +9132,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
 
         # Top Tier Super-Headers
         top_ths = [
-            "<th style='background:#1e293b; color:#94a3b8; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:6px 10px; text-align:left;'>CUSTOMER</th>"
+            "<th style='position:sticky; left:0; z-index:20; background:#1e293b; color:#94a3b8; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:6px 10px; text-align:left; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:210px;'>CUSTOMER</th>"
         ]
         if cat_cols_in_df:
             top_ths.append(
@@ -9158,8 +9163,9 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                 (pay_cols_in_df[0] if pay_cols_in_df else None),
                 (ledger_cols_in_df[0] if ledger_cols_in_df else None),
             ) else ""
+            sticky_th = "position:sticky; left:0; z-index:20; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:210px;" if is_retailer else ""
             sub_ths.append(
-                f"<th style='background:#243248; color:#ffffff; font-size:11.5px; font-weight:700; padding:6px 8px; text-align:{align}; {border_left} white-space:nowrap;'>{_clean_title(c)}</th>"
+                f"<th style='background:#243248; color:#ffffff; font-size:11.5px; font-weight:700; padding:6px 8px; text-align:{align}; {border_left} {sticky_th} white-space:nowrap;'>{_clean_title(c)}</th>"
             )
         sub_header_row = "".join(sub_ths)
 
@@ -9191,6 +9197,8 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
             for c in ordered_cols:
                 val = row.get(c, "")
                 display = str(val) if (is_total and c == "Retailer") else _fmt(c, val)
+                if not is_total and c == "Retailer" and rid_val:
+                    display = f"<span style='background:#e2e8f0; color:#1e293b; padding:1px 5px; border-radius:4px; font-size:11px; font-weight:800; margin-right:6px;'>#{rid_val}</span> {display}"
                 if is_anomaly and anom_info and c == "Retailer":
                     b_type = anom_info.get("anomaly_type", "")
                     b_col = "#dc2626" if b_type == "CATEGORY_MISMATCH" else "#d97706"
@@ -9215,17 +9223,18 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                     and anom_info.get("category_name", "").lower() in c.lower()
                 )
                 cell_extra = "background:#fecaca !important; color:#991b1b !important; font-weight:800 !important; border:1.5px solid #ef4444 !important;" if is_anom_cell else ""
+                sticky_td = f"position:sticky; left:0; z-index:10; background:{bg}; box-shadow:2px 0 6px rgba(0,0,0,0.12); min-width:210px;" if c == "Retailer" else ""
 
                 cells += (
                     f"<td style='padding:6px 8px; text-align:{align}; font-weight:{fw}; "
-                    f"border-bottom:1px solid {'#1e293b' if is_total else '#e2e8f0'}; {border_left} {cell_extra}'>{display}</td>"
+                    f"border-bottom:1px solid {'#1e293b' if is_total else '#e2e8f0'}; {border_left} {sticky_td} {cell_extra}'>{display}</td>"
                 )
             rows_html += f"<tr style='background:{bg}; color:{fg};'>{cells}</tr>"
 
         return (
             f"<div style='overflow-x:auto; border-radius:10px; border:1px solid #cbd5e1; "
             f"box-shadow:0 4px 14px rgba(15,23,42,0.06); margin-bottom:16px;'>"
-            f"<table style='width:100%; border-collapse:collapse; font-size:12px; font-family:Inter,system-ui,sans-serif;'>"
+            f"<table style='width:100%; border-collapse:separate; border-spacing:0; font-size:12px; font-family:Inter,system-ui,sans-serif;'>"
             f"<thead>"
             f"<tr>{top_header_row}</tr>"
             f"<tr>{sub_header_row}</tr>"
@@ -10316,15 +10325,19 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
                 matrix_rows.append(r_dict)
 
             matrix_df = pd.DataFrame(matrix_rows)
+            matrix_df["ID • कामगार नाव (Worker Name)"] = matrix_df.apply(
+                lambda r: f"#{int(r['worker_id'])} {r['कामगार नाव (Name)']}", axis=1
+            )
+            matrix_df = matrix_df.set_index("ID • कामगार नाव (Worker Name)")
 
-            disabled_cols = ["worker_id", "कामगार नाव (Name)", "पद (Role)"]
+            disabled_cols = ["पद (Role)"]
             for d in range(1, days_in_month + 1):
                 if not updated_locks.get(d, True):
                     disabled_cols.append(str(d))
 
             col_configs = {
-                "worker_id": st.column_config.NumberColumn("ID", disabled=True, width="small"),
-                "कामगार नाव (Name)": st.column_config.TextColumn("कामगार नाव", disabled=True, width="medium"),
+                "worker_id": None,
+                "कामगार नाव (Name)": None,
                 "पद (Role)": st.column_config.TextColumn("पद / काम", disabled=True, width="small"),
             }
 
@@ -10356,7 +10369,7 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
                     matrix_df,
                     disabled=disabled_cols,
                     column_config=col_configs,
-                    hide_index=True,
+                    hide_index=False,
                     use_container_width=True,
                     key=f"att_editor_{sel_year}_{sel_month}",
                 )
@@ -10381,9 +10394,14 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
             cached_wages_df = get_worker_wages_df()
             cached_w_master = active_workers.copy()
             for _, r in edited_matrix.iterrows():
-                wid = int(r["worker_id"])
-                wname = str(r["कामगार नाव (Name)"])
-                wrole = str(r["पद (Role)"])
+                wid = int(pd.to_numeric(r.get("worker_id", 0), errors="coerce") or 0)
+                if wid <= 0 and hasattr(r, "name"):
+                    import re
+                    m = re.search(r"#(\d+)", str(r.name))
+                    if m:
+                        wid = int(m.group(1))
+                wname = str(r.get("कामगार नाव (Name)", r.name if hasattr(r, "name") else ""))
+                wrole = str(r.get("पद (Role)", "Staff"))
 
                 full_count = 0
                 half_count = 0
@@ -11635,12 +11653,16 @@ elif menu == "💰 Price Management":
         matrix_rows.append(row)
 
     price_matrix_df = pd.DataFrame(matrix_rows)
-    display_df = price_matrix_df.drop(columns=["retailer_id"])
+    display_df = price_matrix_df.copy()
+    display_df["Retailer (ID & Name)"] = display_df.apply(
+        lambda r: f"#{int(r['retailer_id'])} {r['Retailer']}", axis=1
+    )
+    display_df = display_df.set_index("Retailer (ID & Name)")
+    display_df = display_df.drop(columns=["retailer_id", "Retailer"])
 
     st.subheader(f"Price Matrix — {selected_route} ({len(retailer_list)} Retailers)")
 
     column_config = {
-        "Retailer": st.column_config.TextColumn("Retailer", disabled=True),
         "Route / Zone": st.column_config.TextColumn("Route / Zone", disabled=True),
     }
     for _, c in category_list.iterrows():
@@ -11691,7 +11713,7 @@ elif menu == "💰 Price Management":
 
     if save_price_btn:
         changed_items = []
-        for i, row in edited_df.iterrows():
+        for i, (_, row) in enumerate(edited_df.iterrows()):
             rid = int(price_matrix_df.iloc[i]["retailer_id"])
             for _, c in category_list.iterrows():
                 cid = int(c["category_id"])
@@ -12342,7 +12364,10 @@ elif menu == "📒 Distributor Ledger":
     if "Total Milk (L)" in preview.columns:
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
-    st.dataframe(df_for_display(preview), use_container_width=True)
+    preview_disp = preview.copy()
+    if "Date" in preview_disp.columns:
+        preview_disp = preview_disp.set_index("Date")
+    st.dataframe(df_for_display(preview_disp), use_container_width=True)
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -12531,7 +12556,10 @@ elif menu == "🧾 Distributor Bill" or (menu == "🧾 Bills & Statements" and b
     if "Total Milk (L)" in preview.columns:
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
-    st.dataframe(df_for_display(preview), use_container_width=True)
+    preview_disp = preview.copy()
+    if "Date" in preview_disp.columns:
+        preview_disp = preview_disp.set_index("Date")
+    st.dataframe(df_for_display(preview_disp), use_container_width=True)
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -12949,7 +12977,10 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
     if "Total Milk (L)" in preview.columns:
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
-    st.dataframe(df_for_display(preview), use_container_width=True)
+    preview_disp = preview.copy()
+    if "Date" in preview_disp.columns:
+        preview_disp = preview_disp.set_index("Date")
+    st.dataframe(df_for_display(preview_disp), use_container_width=True)
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -13295,12 +13326,14 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
             ed_grid_rows.append(row_data)
 
         single_r_edit_df = pd.DataFrame(ed_grid_rows)
+        single_r_edit_df["📅 Date"] = single_r_edit_df["Display Date"]
+        single_r_edit_df = single_r_edit_df.set_index("📅 Date")
 
         col_config = {
-            "Date": st.column_config.TextColumn("Date (ISO)", disabled=True),
-            "Display Date": st.column_config.TextColumn("📅 Date", disabled=True),
-            "ID": st.column_config.NumberColumn("Customer ID", disabled=True),
-            "Retailer": st.column_config.TextColumn("Retailer", disabled=True),
+            "Date": None,
+            "Display Date": None,
+            "ID": None,
+            "Retailer": None,
         }
         for cm in editor_cat_cols:
             col_config[cm["col"]] = st.column_config.NumberColumn(
@@ -13321,7 +13354,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
         cat_col_names_ordered = [cm["col"] for cm in editor_cat_cols]
         pay_col_names_ordered = [f"{m_name} ₹" for m_name in PAYMENT_MODES]
-        display_col_order = ["Display Date"] + cat_col_names_ordered + pay_col_names_ordered
+        display_col_order = cat_col_names_ordered + pay_col_names_ordered
         full_col_order = ["Date", "Display Date", "ID", "Retailer"] + cat_col_names_ordered + pay_col_names_ordered
 
         single_r_edit_df = single_r_edit_df[[c for c in full_col_order if c in single_r_edit_df.columns]]
@@ -13364,7 +13397,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                             has_diff = True
                             break
                 if has_diff:
-                    changed_rows.append(new_row)
+                    changed_rows.append((idx, new_row))
 
             if not changed_rows:
                 st.info("ℹ️ कोणतीही दुरुस्ती केलेली नाही. डेटा आधीच अद्ययावत आहे. (No changes were detected. Data is already up-to-date.)")
@@ -13385,10 +13418,16 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                 total_p_upd, total_p_ins, total_p_del = 0, 0, 0
 
                 try:
-                    for day_row in changed_rows:
-                        d_val_str = str(day_row["Date"])
+                    for idx_val, day_row in changed_rows:
+                        orig_match = single_r_edit_df.loc[idx_val] if idx_val in single_r_edit_df.index else None
+                        d_val_str = str(day_row.get("Date", "") or (orig_match.get("Date", "") if orig_match is not None else ""))
+                        if not d_val_str:
+                            d_val_str = str(idx_val)
                         d_val_date = pd.to_datetime(d_val_str).date()
                         day_df = pd.DataFrame([day_row])
+                        day_df["Date"] = d_val_str
+                        day_df["ID"] = int(rid)
+                        day_df["Retailer"] = str(retailer_name)
 
                         diff_res = save_daily_entries_payments_diff(
                             d=d_val_date,
