@@ -13171,158 +13171,6 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
     c5.metric("Closing Due", _fmt_money(closing_due))
     st.divider()
 
-    # ============================================================
-    # ⚡ QUICK DIRECT RATE REVISION FOR THIS RETAILER
-    # ============================================================
-    with st.expander(
-        f"⚡ थेट दर बदला / दर सुधारणा (Quick Rate Change for {retailer_name} — #{rid})",
-        expanded=False,
-    ):
-        st.markdown(
-            f"""
-            <div style="background:linear-gradient(90deg, #0f766e, #0d9488); padding:10px 16px; border-radius:8px; color:#ffffff; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                <div>
-                    <span style="font-weight:800; font-size:14px;">💰 थेट दर बदल (Direct Rate Change — {retailer_name})</span>
-                    <span style="font-size:12px; opacity:0.92; margin-left:10px;">फक्त या एका ग्राहकासाठी कोणत्याही विशिष्ट तारखेचा किंवा चालू बिलातील दर लगेच बदला.</span>
-                </div>
-                <span style="background:rgba(255,255,255,0.22); padding:2px 10px; border-radius:10px; font-size:12px; font-weight:750;">Customer ID: #{rid}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        col_rd1, col_rd2 = st.columns([1.6, 2.4])
-        with col_rd1:
-            rate_eff_date = st.date_input(
-                "📅 दर लागू करण्याची तारीख (Effective Date)",
-                value=start_day,
-                min_value=date(2020, 1, 1),
-                max_value=date(2035, 12, 31),
-                key=f"bill_rate_eff_date_{rid}",
-                help="ज्या तारखेपासून किंवा ज्या विशिष्ट तारखेसाठी हा नवीन दर लागू करायचा आहे ती तारीख निवडा.",
-            )
-        with col_rd2:
-            rate_scope_choice = st.radio(
-                "⚙️ दर लागू करण्याचा नियम (Rate Application Rule)",
-                [
-                    f"🟢 या तारखेपासून पुढील सर्व दिवसांसाठी कायम (From {rate_eff_date.strftime('%d/%m/%Y')} onwards — All future dates)",
-                    f"🟡 फक्त याच एका दिवसासाठी (Only for this single date: {rate_eff_date.strftime('%d/%m/%Y')})",
-                ],
-                index=0,
-                key=f"bill_rate_scope_{rid}",
-            )
-            apply_to_future_flag = ("पुढील सर्व" in rate_scope_choice)
-
-        active_cats_list = [
-            c for _, c in cat_df.iterrows()
-            if int(c.get("category_id", 0)) > 0
-        ] if not cat_df.empty else []
-
-        if not active_cats_list:
-            st.info("कोणतेही सक्रिय दूध प्रकार आढळले नाहीत.")
-        else:
-            st.markdown("<div style='font-weight:750; color:#1e293b; margin:10px 0 6px 0; font-size:13.5px;'>🥛 नवीन दर प्रविष्ट करा (Enter New Rates for this Date):</div>", unsafe_allow_html=True)
-            num_cols = min(4, len(active_cats_list))
-            rate_cols = st.columns(num_cols)
-            user_rate_inputs = {}
-
-            for idx, c_item in enumerate(active_cats_list):
-                c_id_val = int(c_item["category_id"])
-                c_name_val = str(c_item["name"])
-                curr_cat_p = get_price_for_date(rid, c_id_val, rate_eff_date)
-                if curr_cat_p is None:
-                    curr_cat_p = float(c_item.get("default_price", 0.0) or 0.0)
-                else:
-                    curr_cat_p = float(curr_cat_p)
-
-                col_idx = idx % num_cols
-                with rate_cols[col_idx]:
-                    user_val = st.number_input(
-                        f"🥛 {c_name_val} दर (₹) (सध्याचा: ₹{curr_cat_p:.2f})",
-                        min_value=0.0,
-                        value=curr_cat_p,
-                        step=0.5,
-                        format="%.2f",
-                        key=f"bill_rate_in_{rid}_{c_id_val}_{rate_eff_date}",
-                        help=f"{c_name_val} चा {rate_eff_date.strftime('%d/%m/%Y')} रोजीचा चालू दर ₹{curr_cat_p:.2f} आहे.",
-                    )
-                    user_rate_inputs[c_id_val] = {
-                        "category_name": c_name_val,
-                        "new_price": round(float(user_val), 2),
-                        "old_price": round(float(curr_cat_p), 2),
-                    }
-
-            st.write("")
-            if apply_to_future_flag:
-                st.caption(
-                    f"ℹ️ **लागू नियम:** हा नवीन दर **{rate_eff_date.strftime('%d/%m/%Y')}** पासून **पुढील सर्व दिवसांच्या डिलिव्हरींसाठी कायमस्वरूपी** लागू होईल आणि या बिलातील सर्व हिशोब आपोआप अपडेट होतील."
-                )
-            else:
-                st.caption(
-                    f"ℹ️ **लागू नियम:** हा नवीन दर **फक्त {rate_eff_date.strftime('%d/%m/%Y')}** या एकाच दिवसासाठी लागू राहील; दुसऱ्या दिवसापासून आपोआप जुना नेहमीचा दर कायम राहील."
-                )
-
-            col_btn1, col_btn2 = st.columns([2.5, 1.5], vertical_alignment="center")
-            with col_btn2:
-                do_save_rate = st.button(
-                    "💾 दर सेव्ह करा व बिल रिफ्रेश करा",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"btn_save_bill_rate_{rid}",
-                    disabled=is_app_saving_locked(),
-                    help="हा दर सेव्ह करून बिलातील सर्व हिशोब त्वरित पुन्हा मोजले जातील.",
-                )
-
-            if do_save_rate:
-                changed_rate_items = []
-                for cid_k, r_info in user_rate_inputs.items():
-                    n_p = r_info["new_price"]
-                    o_p = r_info["old_price"]
-                    if n_p > 0 and abs(n_p - o_p) > 0.001:
-                        changed_rate_items.append({
-                            "category_id": cid_k,
-                            "category_name": r_info["category_name"],
-                            "new_price": n_p,
-                            "old_price": o_p,
-                        })
-
-                if not changed_rate_items:
-                    st.info("ℹ️ कोणतीही किंमत बदललेली नाही. (No price change detected.)")
-                else:
-                    st.session_state["is_saving_active"] = True
-                    save_rate_overlay = st.empty()
-                    save_rate_overlay.markdown("""
-                    <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999;
-                                background:rgba(15,23,42,0.65); backdrop-filter:blur(4px);
-                                display:flex; flex-direction:column; align-items:center; justify-content:center;
-                                color:#ffffff; font-family:sans-serif; text-align:center; pointer-events:all;">
-                      <div style="font-size:42px; margin-bottom:12px;">⏳</div>
-                      <div style="font-size:22px; font-weight:900;">नवीन दर सेव्ह होत आहे व बिल अपडेट होत आहे...</div>
-                      <div style="font-size:15px; color:#93c5fd; font-weight:700; margin-top:6px;">Saving rate and recalculating bill. Please wait...</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    try:
-                        res = save_retailer_rate_changes(
-                            retailer_id=rid,
-                            eff_date=rate_eff_date,
-                            changed_items=changed_rate_items,
-                            apply_to_future=apply_to_future_flag,
-                        )
-                    finally:
-                        st.session_state["is_saving_active"] = False
-                        save_rate_overlay.empty()
-
-                    scope_str = "पुढील सर्व तारखांसाठी (All future dates)" if apply_to_future_flag else "फक्त एका दिवसासाठी (Single-day only)"
-                    c_details = ", ".join([f"{x['category_name']}: ₹{x['old_price']:.2f} ➔ ₹{x['new_price']:.2f}" for x in changed_rate_items])
-                    st.success(
-                        f"✅ {retailer_name} साठी दर यशस्वीरित्या बदलला ({c_details})!\n\n"
-                        f"• नियम: {scope_str} (तारीख: {rate_eff_date.strftime('%d/%m/%Y')})\n"
-                        f"• {res.get('entries_updated', 0)} डिलिव्हरी नोंदींचे दर व रक्कम पुन्हा मोजण्यात आली.\n\n"
-                        f"बिल त्वरित रिफ्रेश होत आहे..."
-                    )
-                    st.rerun()
-
     st.subheader("📌 Bill Preview (Arrow-safe)")
 
     preview = grid.copy()
@@ -13825,6 +13673,177 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                     st.rerun()
                 else:
                     st.info("ℹ️ No changes were detected. Data is already up-to-date.")
+
+    # ============================================================
+    # SECTION: 💰 DIRECT RATE MANAGEMENT MATRIX FOR THIS RETAILER
+    # ============================================================
+    st.markdown("---")
+    st.markdown(
+        f"""
+        <div style="background:linear-gradient(90deg, #065f46, #059669); padding:14px 20px; border-radius:10px; margin:20px 0 14px 0; color:#ffffff; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; box-shadow:0 4px 12px rgba(6,95,70,0.15);">
+            <div>
+                <div style="font-size:16px; font-weight:850; letter-spacing:0.02em;">
+                    💰 थेट दर व्यवस्थापन (Rate Management): {retailer_name} (#{rid})
+                </div>
+                <div style="font-size:12.5px; opacity:0.92; margin-top:3px;">
+                    फक्त या एका ग्राहकासाठी कोणत्याही विशिष्ट तारखेचा दर खालील टेबलमध्ये थेट बदला. (Edit rates directly in the cells below just like Price Management).
+                </div>
+            </div>
+            <span style="background:rgba(255,255,255,0.22); padding:4px 14px; border-radius:12px; font-size:12.5px; font-weight:750;">
+                Customer ID: #{rid} • Route: {rrow.get('zone', 'Default')}
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_r_date1, col_r_date2 = st.columns([1.5, 2.5], vertical_alignment="center")
+    with col_r_date1:
+        rate_matrix_date = st.date_input(
+            "📅 दर लागू करण्याची तारीख (Rate Effective Date)",
+            value=end_day,
+            min_value=date(2020, 1, 1),
+            max_value=date(2035, 12, 31),
+            key=f"bill_rate_eff_date_single_{rid}",
+            help="ज्या तारखेपासून किंवा ज्या विशिष्ट तारखेसाठी हा नवीन दर लागू करायचा आहे ती तारीख निवडा.",
+        )
+
+    # Build single retailer price matrix row
+    category_list_bill = (
+        categories_active.sort_values("name")
+        if not categories_active.empty
+        else (categories.sort_values("name") if not categories.empty else pd.DataFrame())
+    )
+
+    if category_list_bill.empty:
+        st.info("No active categories found.")
+    else:
+        single_r_price_row = {
+            "retailer_id": rid,
+            "Retailer": retailer_name,
+            "Route / Zone": rrow.get("zone", "Default"),
+        }
+        for _, c in category_list_bill.iterrows():
+            cid = int(c["category_id"])
+            cname = str(c["name"])
+            p = get_price_for_date(rid, cid, rate_matrix_date)
+            if p is None:
+                p = float(c.get("default_price", 0.0) or 0.0)
+            single_r_price_row[cname] = float(p)
+
+        single_price_df = pd.DataFrame([single_r_price_row])
+        single_display_df = single_price_df.copy()
+        single_display_df["Retailer (ID & Name)"] = f"#{rid} {retailer_name}"
+        single_display_df = single_display_df.set_index("Retailer (ID & Name)")
+        single_display_df = single_display_df.drop(columns=["retailer_id", "Retailer"])
+
+        single_price_col_config = {
+            "Route / Zone": st.column_config.TextColumn("Route / Zone", disabled=True),
+        }
+        for _, c in category_list_bill.iterrows():
+            single_price_col_config[str(c["name"])] = st.column_config.NumberColumn(
+                str(c["name"]), min_value=0.0, step=0.5, format="₹%.2f"
+            )
+
+        with st.form(f"single_r_price_form_{rid}_{rate_matrix_date}", clear_on_submit=False):
+            c_tick1, c_tick2 = st.columns([2.5, 1.5], vertical_alignment="center")
+            with c_tick1:
+                apply_to_future = st.checkbox(
+                    "✅ पुढील सर्व तारखांसाठी हा दर कायम लागू करा (Apply price to ALL further dates onwards)",
+                    value=True,
+                    key=f"single_r_price_tick_{rid}_{rate_matrix_date}",
+                    help="Checked (✓): या तारखेपासून पुढील सर्व दिवसांच्या डिलिव्हरीसाठी हा नवीन दर कायम राहील (Applies to this date and all future dates).\nUnchecked: फक्त याच एका दिवसासाठी हा दर लागू राहील; दुसऱ्या दिवसापासून आपोआप जुना नेहमीचा दर सुरू राहील (Single-day only).",
+                )
+            with c_tick2:
+                if apply_to_future:
+                    st.markdown(
+                        "<span style='background:#dcfce7; color:#166534; font-weight:700; padding:4px 10px; border-radius:6px; font-size:13px; display:inline-block;'>"
+                        "🟢 कायमस्वरूपी दर (All Future Dates)</span>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        "<span style='background:#fef3c7; color:#92400e; font-weight:700; padding:4px 10px; border-radius:6px; font-size:13px; display:inline-block;'>"
+                        "🟡 फक्त एका दिवसाचा दर (Single-Day Only)</span>",
+                        unsafe_allow_html=True,
+                    )
+
+            edited_single_price_df = st.data_editor(
+                single_display_df,
+                column_config=single_price_col_config,
+                use_container_width=True,
+                num_rows="fixed",
+                key=f"single_r_price_editor_{rid}_{rate_matrix_date}_{st.session_state.get('data_version', 0)}",
+            )
+
+            st.markdown("---")
+            c_save1, c_save2 = st.columns([2.5, 1.5], vertical_alignment="center")
+            with c_save1:
+                if apply_to_future:
+                    st.caption(f"ℹ️ **लागू नियम:** टिक चालू आहे (✓). हा दर **{rate_matrix_date.strftime('%d/%m/%Y')}** पासून **पुढील सर्व दिवसांसाठी कायम लागू** होईल आणि या बिलातील व पुढील सर्व डिलिव्हरींचे हिशोब आपोआप अपडेट होतील.")
+                else:
+                    st.caption(f"ℹ️ **लागू नियम:** टिक बंद आहे. हा दर **फक्त {rate_matrix_date.strftime('%d/%m/%Y')}** एकाच दिवसासाठी राहील, दुसऱ्या दिवसापासून जुना दर आपोआप लागू राहील.")
+            with c_save2:
+                save_single_price_btn = st.form_submit_button(
+                    f"💾 Save Price Changes for {retailer_name}",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=is_app_saving_locked(),
+                )
+
+        if save_single_price_btn and edited_single_price_df is not None:
+            changed_items = []
+            for _, row in edited_single_price_df.iterrows():
+                for _, c in category_list_bill.iterrows():
+                    cid = int(c["category_id"])
+                    col = str(c["name"])
+                    new_p = round(float(pd.to_numeric(row[col], errors="coerce") or 0.0), 2)
+                    old_p = round(float(get_price_for_date(rid, cid, rate_matrix_date) or c.get("default_price", 0.0) or 0.0), 2)
+                    if new_p > 0 and abs(new_p - old_p) > 0.001:
+                        changed_items.append({
+                            "category_id": cid,
+                            "category_name": col,
+                            "new_price": new_p,
+                            "old_price": old_p,
+                        })
+
+            if not changed_items:
+                st.info("ℹ️ कोणतीही किंमत बदललेली नाही. (No price changes detected.)")
+            else:
+                st.session_state["is_saving_active"] = True
+                save_rate_overlay = st.empty()
+                save_rate_overlay.markdown("""
+                <div style="position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:9999999;
+                            background:rgba(15,23,42,0.65); backdrop-filter:blur(4px);
+                            display:flex; flex-direction:column; align-items:center; justify-content:center;
+                            color:#ffffff; font-family:sans-serif; text-align:center; pointer-events:all;">
+                  <div style="font-size:42px; margin-bottom:12px;">⏳</div>
+                  <div style="font-size:22px; font-weight:900;">किंमती सेव्ह होत आहेत व बिल अपडेट होत आहे...</div>
+                  <div style="font-size:15px; color:#93c5fd; font-weight:700; margin-top:6px;">Saving rate changes securely and recalculating bill. Please wait...</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                try:
+                    res = save_retailer_rate_changes(
+                        retailer_id=rid,
+                        eff_date=rate_matrix_date,
+                        changed_items=changed_items,
+                        apply_to_future=apply_to_future,
+                    )
+                finally:
+                    st.session_state["is_saving_active"] = False
+                    save_rate_overlay.empty()
+
+                scope_lbl = "पुढील सर्व तारखांसाठी (All future dates)" if apply_to_future else "फक्त एका दिवसासाठी (Single-day only)"
+                c_details = ", ".join([f"{x['category_name']}: ₹{x['old_price']:.2f} ➔ ₹{x['new_price']:.2f}" for x in changed_items])
+                st.success(
+                    f"✅ {retailer_name} साठी दर यशस्वीरित्या बदलला ({c_details})!\n\n"
+                    f"• नियम: {scope_lbl} (तारीख: {rate_matrix_date.strftime('%d/%m/%Y')})\n"
+                    f"• {res.get('entries_updated', 0)} डिलिव्हरी नोंदींचे दर व रक्कम पुन्हा मोजण्यात आली.\n\n"
+                    f"बिल त्वरित रिफ्रेश होत आहे..."
+                )
+                st.rerun()
+
 
 # ============================================================
 # PAGE: 🛡️ DATA HEALTH & BACKUP
