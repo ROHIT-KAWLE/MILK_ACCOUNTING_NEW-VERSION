@@ -13238,11 +13238,11 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                 col_idx = idx % num_cols
                 with rate_cols[col_idx]:
                     user_val = st.number_input(
-                        f"🥛 {c_name_val} (सध्याचा: ₹{curr_cat_p:.2f})",
+                        f"🥛 {c_name_val} दर (₹) (सध्याचा: ₹{curr_cat_p:.2f})",
                         min_value=0.0,
                         value=curr_cat_p,
                         step=0.5,
-                        format="₹%.2f",
+                        format="%.2f",
                         key=f"bill_rate_in_{rid}_{c_id_val}_{rate_eff_date}",
                         help=f"{c_name_val} चा {rate_eff_date.strftime('%d/%m/%Y')} रोजीचा चालू दर ₹{curr_cat_p:.2f} आहे.",
                     )
