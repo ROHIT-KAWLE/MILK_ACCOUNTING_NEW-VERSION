@@ -85,6 +85,12 @@ st.markdown(
   --primary2: #1D4ED8;
 }
 
+html, body, #root, .main, [data-testid="stAppViewContainer"], .stApp {
+  overscroll-behavior-y: none !important;
+  overscroll-behavior-x: none !important;
+  overscroll-behavior: contain !important;
+}
+
 .stApp {
   background: radial-gradient(1100px 650px at 8% 0%, rgba(37,99,235,0.06), transparent 55%),
               radial-gradient(900px 500px at 92% 10%, rgba(16,185,129,0.05), transparent 55%),
@@ -354,6 +360,8 @@ def invalidate_data_cache():
     st.session_state["dist_flat_payments"] = pd.DataFrame()
     st.session_state["backup_zip_bytes"] = None
     st.session_state["backup_zip_version"] = None
+    st.session_state["_fast_price_idx"] = None
+    st.session_state["_fast_price_idx_version"] = None
 
 
 # ============================================================
@@ -4559,6 +4567,98 @@ def remove_main_retailers(retailer_ids: list[int]) -> None:
 # ============================================================
 # RETAILER PRICING & LEDGER HELPERS
 # ============================================================
+class FastPriceIndex:
+    """High-speed in-memory indexed price resolver.
+    Replaces thousands of expensive pandas copy/date-parse/sort operations with O(1) dict lookups.
+    """
+    def __init__(self, prices_df: pd.DataFrame, categories_df: pd.DataFrame):
+        self._price_map = {}
+        self._global_price_map = {}
+        self._cat_default = {}
+        self.rebuild(prices_df, categories_df)
+
+    def rebuild(self, prices_df: pd.DataFrame, categories_df: pd.DataFrame):
+        self._price_map.clear()
+        self._global_price_map.clear()
+        self._cat_default.clear()
+
+        if categories_df is not None and not categories_df.empty and "category_id" in categories_df.columns:
+            for _, r in categories_df.iterrows():
+                try:
+                    cid = int(r["category_id"])
+                    dp = float(r.get("default_price", 0.0) or 0.0)
+                    if dp > 0:
+                        self._cat_default[cid] = dp
+                except Exception:
+                    pass
+
+        if prices_df is not None and not prices_df.empty:
+            df = prices_df.copy()
+            df["retailer_id"] = pd.to_numeric(df.get("retailer_id", 0), errors="coerce").fillna(0).astype(int)
+            df["category_id"] = pd.to_numeric(df.get("category_id", 0), errors="coerce").fillna(0).astype(int)
+            df["price"] = pd.to_numeric(df.get("price", 0.0), errors="coerce").fillna(0.0).astype(float)
+            df["dt"] = pd.to_datetime(df.get("effective_date"), errors="coerce").dt.date
+            df = df.loc[df["dt"].notna() & (df["price"] > 0)]
+            df = df.sort_values("dt", ascending=False)
+
+            for _, row in df.iterrows():
+                rid = int(row["retailer_id"])
+                cid = int(row["category_id"])
+                dt_val = row["dt"]
+                p_val = float(row["price"])
+
+                if rid == GLOBAL_RETAILER_ID:
+                    self._global_price_map.setdefault(cid, []).append((dt_val, p_val))
+                else:
+                    self._price_map.setdefault((rid, cid), []).append((dt_val, p_val))
+
+    def get_price(self, retailer_id: int, category_id: int, entry_date) -> float | None:
+        rid = int(retailer_id)
+        cid = int(category_id)
+        if isinstance(entry_date, (datetime, pd.Timestamp)):
+            target_dt = entry_date.date()
+        elif isinstance(entry_date, date):
+            target_dt = entry_date
+        else:
+            try:
+                target_dt = pd.to_datetime(entry_date).date()
+            except Exception:
+                return None
+
+        # 1. Specific retailer check (sorted descending by effective date)
+        records = self._price_map.get((rid, cid))
+        if records:
+            for eff_d, pr in records:
+                if eff_d <= target_dt:
+                    return pr
+
+        # 2. Global retailer check (retailer_id == 0)
+        g_records = self._global_price_map.get(cid)
+        if g_records:
+            for eff_d, pr in g_records:
+                if eff_d <= target_dt:
+                    return pr
+
+        # 3. Category default price fallback
+        dp = self._cat_default.get(cid)
+        if dp is not None and dp > 0:
+            return dp
+
+        return None
+
+
+def get_fast_price_index() -> FastPriceIndex:
+    dv = st.session_state.get("data_version", 0)
+    curr_idx = st.session_state.get("_fast_price_idx")
+    curr_v = st.session_state.get("_fast_price_idx_version")
+    if curr_idx is None or curr_v != dv:
+        idx = FastPriceIndex(prices, categories)
+        st.session_state["_fast_price_idx"] = idx
+        st.session_state["_fast_price_idx_version"] = dv
+        return idx
+    return curr_idx
+
+
 def _get_effective_price(
     price_df: pd.DataFrame, entry_dt: pd.Timestamp
 ) -> float | None:
@@ -4578,8 +4678,16 @@ def _get_effective_price(
 
 
 def get_price_for_date(retailer_id: int, category_id: int, entry_date) -> float | None:
-    entry_dt = pd.to_datetime(entry_date)
+    try:
+        idx = get_fast_price_index()
+        p = idx.get_price(retailer_id, category_id, entry_date)
+        if p is not None:
+            return p
+    except Exception:
+        pass
 
+    # Safety fallback to original logic
+    entry_dt = pd.to_datetime(entry_date)
     if not prices.empty:
         rs = prices.loc[
             (prices["retailer_id"] == int(retailer_id))
@@ -4607,37 +4715,25 @@ def get_price_for_date(retailer_id: int, category_id: int, entry_date) -> float 
     return None
 
 
-def save_retailer_rate_changes(
+def save_retailer_rate_changes_batch(
     retailer_id: int,
-    eff_date,
-    changed_items: list[dict],
+    changed_by_date: dict,
     apply_to_future: bool = True,
 ) -> dict:
     """
-    Saves price revisions directly for a specific retailer:
-    1. Upserts price record into Supabase 'prices' table and local data/prices.csv.
-       - If apply_to_future is False (single-day only):
-         Adds price record for eff_date, and also adds record for (eff_date + 1 day)
-         restoring old_price so future dates automatically retain their regular price.
-       - If apply_to_future is True:
-         Adds price record for eff_date which applies to all future dates onwards.
-    2. Retroactively updates existing delivery entries for this retailer:
-       - If apply_to_future is True: updates all entries with date >= eff_date.
-       - If apply_to_future is False: updates only entries with date == eff_date.
-       Calculates rate = new_price, amount = round(qty * new_price, 2).
-       Upserts to Supabase 'entries' and syncs to local data/entries.csv.
-    3. Invalidates data cache.
+    High-performance atomic batch saver for retailer price revisions:
+    1. Collects all price revisions across all changed dates.
+    2. Queries max price_id and existing records in ONE round-trip.
+    3. Performs a single batch upsert to Supabase 'prices' and syncs local data/prices.csv.
+    4. Fetches and retroactively recalculates affected delivery entries in ONE batch.
+    5. Invalidates data cache ONCE at completion.
     """
     from datetime import timedelta, date as d_cls
-    if not isinstance(eff_date, d_cls):
-        eff_d = pd.to_datetime(eff_date).date()
-    else:
-        eff_d = eff_date
+    if not changed_by_date:
+        return {"success": True, "prices_saved": 0, "entries_updated": 0}
 
     rid = int(retailer_id)
-    eff_str = str(eff_d)
-    next_day_str = str(eff_d + timedelta(days=1))
-    cids = [int(x["category_id"]) for x in changed_items]
+    all_cids = sorted(list({int(item["category_id"]) for items in changed_by_date.values() for item in items}))
 
     sb = get_sb()
     max_pid = 0
@@ -4662,7 +4758,7 @@ def save_retailer_rate_changes(
         existing_prices = sb_fetch_where(
             "prices",
             cols="price_id,retailer_id,category_id,price,effective_date",
-            filters=[("retailer_id", "in", [rid]), ("category_id", "in", cids)],
+            filters=[("retailer_id", "in", [rid]), ("category_id", "in", all_cids)],
         )
         for ep in (existing_prices or []):
             pid = int(ep.get("price_id") or 0)
@@ -4692,39 +4788,51 @@ def save_retailer_rate_changes(
     price_upsert_rows = []
     next_pid = max_pid + 1
 
-    for item in changed_items:
-        cid = int(item["category_id"])
-        new_p = round(float(item["new_price"]), 2)
-        old_p = round(float(item["old_price"]), 2)
+    changed_dates_sorted = sorted(changed_by_date.keys())
+    changed_dates_set = {d if isinstance(d, d_cls) else pd.to_datetime(d).date() for d in changed_dates_sorted}
 
-        pid_eff = ex_price_map.get((rid, cid, eff_str))
-        if pid_eff is None:
-            pid_eff = next_pid
-            next_pid += 1
-            ex_price_map[(rid, cid, eff_str)] = pid_eff
+    for ch_d in changed_dates_sorted:
+        eff_d = ch_d if isinstance(ch_d, d_cls) else pd.to_datetime(ch_d).date()
+        eff_str = str(eff_d)
+        next_day = eff_d + timedelta(days=1)
+        next_day_str = str(next_day)
+        items = changed_by_date[ch_d]
 
-        price_upsert_rows.append({
-            "price_id": pid_eff,
-            "retailer_id": rid,
-            "category_id": cid,
-            "price": new_p,
-            "effective_date": eff_str,
-        })
+        for item in items:
+            cid = int(item["category_id"])
+            new_p = round(float(item["new_price"]), 2)
+            old_p = round(float(item["old_price"]), 2)
 
-        if not apply_to_future:
-            pid_next = ex_price_map.get((rid, cid, next_day_str))
-            if pid_next is None:
-                pid_next = next_pid
+            pid_eff = ex_price_map.get((rid, cid, eff_str))
+            if pid_eff is None:
+                pid_eff = next_pid
                 next_pid += 1
-                ex_price_map[(rid, cid, next_day_str)] = pid_next
+                ex_price_map[(rid, cid, eff_str)] = pid_eff
+
             price_upsert_rows.append({
-                "price_id": pid_next,
+                "price_id": pid_eff,
                 "retailer_id": rid,
                 "category_id": cid,
-                "price": old_p,
-                "effective_date": next_day_str,
+                "price": new_p,
+                "effective_date": eff_str,
             })
 
+            # If single-day only, restore regular rate on next day unless next day is also explicitly in changed_by_date
+            if not apply_to_future and next_day not in changed_dates_set:
+                pid_next = ex_price_map.get((rid, cid, next_day_str))
+                if pid_next is None:
+                    pid_next = next_pid
+                    next_pid += 1
+                    ex_price_map[(rid, cid, next_day_str)] = pid_next
+                price_upsert_rows.append({
+                    "price_id": pid_next,
+                    "retailer_id": rid,
+                    "category_id": cid,
+                    "price": old_p,
+                    "effective_date": next_day_str,
+                })
+
+    # High-speed batch upsert prices
     try:
         for i in range(0, len(price_upsert_rows), 500):
             sb.table("prices").upsert(price_upsert_rows[i : i + 500], on_conflict="price_id").execute()
@@ -4746,22 +4854,37 @@ def save_retailer_rate_changes(
     except Exception as _csv_p_err:
         print("CSV price sync non-fatal error:", _csv_p_err)
 
+    # Temporary price index for fast recalculation
+    temp_prices_list = []
+    if os.path.exists(PRICES_FILE):
+        try:
+            temp_prices_list.append(pd.read_csv(PRICES_FILE))
+        except Exception:
+            pass
+    temp_prices_df = pd.concat(temp_prices_list + [pd.DataFrame(price_upsert_rows)], ignore_index=True) if temp_prices_list else pd.DataFrame(price_upsert_rows)
+    temp_price_idx = FastPriceIndex(temp_prices_df, categories)
+
     recalc_count = 0
     try:
-        date_filters = [("date", "eq", eff_str)] if not apply_to_future else [("date", "gte", eff_str)]
-        entries_query_filters = [("retailer_id", "eq", rid), ("category_id", "in", cids)] + date_filters
+        min_eff_d = min(changed_dates_set)
+        min_eff_str = str(min_eff_d)
+
+        date_filters = [("date", "in", [str(d) for d in changed_dates_set])] if not apply_to_future else [("date", "gte", min_eff_str)]
+        entries_query_filters = [("retailer_id", "eq", rid), ("category_id", "in", all_cids)] + date_filters
         affected_entries = sb_fetch_where(
             "entries",
             cols="entry_id,retailer_id,category_id,date,qty,rate,amount",
             filters=entries_query_filters,
         )
         entries_to_upsert = []
-        changed_lookup = {int(x["category_id"]): float(x["new_price"]) for x in changed_items}
 
         for erow in (affected_entries or []):
             c_id = int(erow["category_id"])
-            new_rate = changed_lookup.get(c_id)
-            if new_rate is not None:
+            e_dt_str = str(erow["date"])
+            e_dt = pd.to_datetime(e_dt_str).date()
+            new_rate = temp_price_idx.get_price(rid, c_id, e_dt)
+
+            if new_rate is not None and new_rate > 0:
                 old_rate = float(erow.get("rate") or 0.0)
                 if abs(new_rate - old_rate) > 0.001:
                     qty = float(erow.get("qty") or 0.0)
@@ -4770,7 +4893,7 @@ def save_retailer_rate_changes(
                         "entry_id": int(erow["entry_id"]),
                         "retailer_id": rid,
                         "category_id": c_id,
-                        "date": str(erow["date"]),
+                        "date": e_dt_str,
                         "qty": qty,
                         "rate": round(new_rate, 4),
                         "amount": new_amt,
@@ -4790,22 +4913,12 @@ def save_retailer_rate_changes(
             try:
                 loc_entries = pd.read_csv(ENTRIES_FILE)
                 if not loc_entries.empty:
-                    changed_map = {int(x["category_id"]): float(x["new_price"]) for x in changed_items}
-                    for cid_ch, n_rate in changed_map.items():
-                        c_mask = (
-                            (loc_entries["retailer_id"].astype(int) == rid)
-                            & (loc_entries["category_id"].astype(int) == cid_ch)
-                        )
-                        if not apply_to_future:
-                            d_mask = (loc_entries["date"].astype(str) == eff_str)
-                        else:
-                            d_mask = (loc_entries["date"].astype(str) >= eff_str)
-                        match_mask = c_mask & d_mask
-                        if match_mask.any():
-                            loc_entries.loc[match_mask, "rate"] = n_rate
-                            loc_entries.loc[match_mask, "amount"] = (
-                                pd.to_numeric(loc_entries.loc[match_mask, "qty"], errors="coerce").fillna(0.0) * n_rate
-                            ).round(2)
+                    for erow_upd in entries_to_upsert:
+                        eid = erow_upd["entry_id"]
+                        e_mask = loc_entries["entry_id"].astype(int) == eid if "entry_id" in loc_entries.columns else pd.Series([False]*len(loc_entries))
+                        if e_mask.any():
+                            loc_entries.loc[e_mask, "rate"] = erow_upd["rate"]
+                            loc_entries.loc[e_mask, "amount"] = erow_upd["amount"]
                     loc_entries.to_csv(ENTRIES_FILE, index=False)
             except Exception as _csv_e_err:
                 print("Local entries sync non-fatal error:", _csv_e_err)
@@ -4818,9 +4931,27 @@ def save_retailer_rate_changes(
         "success": True,
         "prices_saved": len(price_upsert_rows),
         "entries_updated": recalc_count,
-        "eff_date": eff_d,
         "apply_to_future": apply_to_future,
     }
+
+
+def save_retailer_rate_changes(
+    retailer_id: int,
+    eff_date,
+    changed_items: list[dict],
+    apply_to_future: bool = True,
+) -> dict:
+    """
+    Saves price revisions directly for a specific retailer by delegating to
+    save_retailer_rate_changes_batch.
+    """
+    from datetime import date as d_cls
+    eff_d = eff_date if isinstance(eff_date, d_cls) else pd.to_datetime(eff_date).date()
+    return save_retailer_rate_changes_batch(
+        retailer_id=retailer_id,
+        changed_by_date={eff_d: changed_items},
+        apply_to_future=apply_to_future,
+    )
 
 
 def get_retailer_balance(retailer_id: int) -> float:
@@ -4957,6 +5088,7 @@ def save_daily_entries_payments_diff(
     edited_df: pd.DataFrame,
     cat_cols: list[dict],
     sb=None,
+    invalidate_cache: bool = True,
 ) -> dict:
     """
     Diff-based intelligent saver: ONLY updates, inserts, or deletes records
@@ -5133,19 +5265,61 @@ def save_daily_entries_payments_diff(
     if to_delete_payment_ids:
         sb_delete_by_pk("payments", "payment_id", to_delete_payment_ids)
 
-    if to_update_entries and sb is not None:
-        for eid, payload in to_update_entries:
+    if to_update_entries:
+        if sb is not None:
             try:
-                sb.table("entries").update(payload).eq("entry_id", int(eid)).execute()
+                # Fast batch upsert on primary key
+                batch_e_upd = [{"entry_id": int(eid), **payload} for eid, payload in to_update_entries]
+                for i in range(0, len(batch_e_upd), 500):
+                    sb.table("entries").upsert(batch_e_upd[i : i + 500], on_conflict="entry_id").execute()
             except Exception as e:
-                print(f"Update entry {eid} error: {e}")
+                print(f"Batch update entries error, falling back: {e}")
+                for eid, payload in to_update_entries:
+                    try:
+                        sb.table("entries").update(payload).eq("entry_id", int(eid)).execute()
+                    except Exception as e2:
+                        print(f"Update entry {eid} error: {e2}")
 
-    if to_update_payments and sb is not None:
-        for pid, payload in to_update_payments:
+        if os.path.exists(ENTRIES_FILE):
             try:
-                sb.table("payments").update(payload).eq("payment_id", int(pid)).execute()
+                loc_df = pd.read_csv(ENTRIES_FILE)
+                if not loc_df.empty and "entry_id" in loc_df.columns:
+                    for eid, payload in to_update_entries:
+                        m = loc_df["entry_id"].astype(int) == int(eid)
+                        if m.any():
+                            for k, v in payload.items():
+                                loc_df.loc[m, k] = v
+                    loc_df.to_csv(ENTRIES_FILE, index=False)
+            except Exception as _e_loc:
+                print("Local entries update error:", _e_loc)
+
+    if to_update_payments:
+        if sb is not None:
+            try:
+                # Fast batch upsert on primary key
+                batch_p_upd = [{"payment_id": int(pid), **payload} for pid, payload in to_update_payments]
+                for i in range(0, len(batch_p_upd), 500):
+                    sb.table("payments").upsert(batch_p_upd[i : i + 500], on_conflict="payment_id").execute()
             except Exception as e:
-                print(f"Update payment {pid} error: {e}")
+                print(f"Batch update payments error, falling back: {e}")
+                for pid, payload in to_update_payments:
+                    try:
+                        sb.table("payments").update(payload).eq("payment_id", int(pid)).execute()
+                    except Exception as e2:
+                        print(f"Update payment {pid} error: {e2}")
+
+        if os.path.exists(PAYMENTS_FILE):
+            try:
+                loc_pdf = pd.read_csv(PAYMENTS_FILE)
+                if not loc_pdf.empty and "payment_id" in loc_pdf.columns:
+                    for pid, payload in to_update_payments:
+                        m = loc_pdf["payment_id"].astype(int) == int(pid)
+                        if m.any():
+                            for k, v in payload.items():
+                                loc_pdf.loc[m, k] = v
+                    loc_pdf.to_csv(PAYMENTS_FILE, index=False)
+            except Exception as _p_loc:
+                print("Local payments update error:", _p_loc)
 
     if to_insert_entries:
         sb_insert_df(to_insert_entries, ENTRIES_FILE)
@@ -5158,7 +5332,7 @@ def save_daily_entries_payments_diff(
         + len(to_update_payments) + len(to_insert_payments) + len(to_delete_payment_ids)
     )
 
-    if total_changes > 0:
+    if total_changes > 0 and invalidate_cache:
         invalidate_data_cache()
         st.session_state["data_version"] = int(st.session_state.get("data_version", 0)) + 1
 
@@ -5455,8 +5629,57 @@ def _rate_from_entries_or_price(
     return get_price_for_date(int(retailer_id), int(cid), d)
 
 
+@st.cache_data(show_spinner=False)
+def cached_fetch_retailer_bill_data(rid: int, start_d, end_d, data_version: int):
+    _ = data_version
+    s_str = str(start_d)
+    e_str = str(end_d)
+    if USE_SERVER_FILTERS:
+        e = sb_fetch_df(
+            ENTRIES_FILE,
+            CSV_SCHEMAS[ENTRIES_FILE],
+            filters=[
+                ("retailer_id", "eq", int(rid)),
+                ("date", "gte", s_str),
+                ("date", "lte", e_str),
+            ],
+        )
+        p = sb_fetch_df(
+            PAYMENTS_FILE,
+            CSV_SCHEMAS[PAYMENTS_FILE],
+            filters=[
+                ("retailer_id", "eq", int(rid)),
+                ("date", "gte", s_str),
+                ("date", "lte", e_str),
+            ],
+        )
+    else:
+        e = entries.loc[
+            (entries["retailer_id"].astype(int) == int(rid))
+            & (entries["date"] >= start_d)
+            & (entries["date"] <= end_d)
+        ].copy() if not entries.empty else pd.DataFrame()
+        p = payments.loc[
+            (payments["retailer_id"].astype(int) == int(rid))
+            & (payments["date"] >= start_d)
+            & (payments["date"] <= end_d)
+        ].copy() if not payments.empty else pd.DataFrame()
+
+    if e is not None and not e.empty and "date" in e.columns:
+        e["date"] = _safe_dt(e["date"]).dt.date
+    if p is not None and not p.empty and "date" in p.columns:
+        p["date"] = _safe_dt(p["date"]).dt.date
+
+    return e, p
+
+
 def build_bill_daily_grid(
-    retailer_id: int, start_day: date, end_day: date, cat_names: list[str]
+    retailer_id: int,
+    start_day: date,
+    end_day: date,
+    cat_names: list[str],
+    entries_df: pd.DataFrame = None,
+    payments_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
     """
     SINGLE authoritative bill grid. No duplicates.
@@ -5472,51 +5695,20 @@ def build_bill_daily_grid(
     """
     days = pd.date_range(start=start_day, end=end_day, freq="D").date
 
-    if USE_SERVER_FILTERS:
-        e = sb_fetch_df(
-            ENTRIES_FILE,
-            CSV_SCHEMAS[ENTRIES_FILE],
-            filters=[
-                ("retailer_id", "eq", int(retailer_id)),
-                ("date", "gte", str(start_day)),
-                ("date", "lte", str(end_day)),
-            ],
-        )
+    if entries_df is not None and payments_df is not None:
+        e = entries_df.copy()
+        p = payments_df.copy()
     else:
-        e = entries.copy()
-    if not e.empty:
-        e["date"] = _safe_dt(e["date"]).dt.date
-        e = e.loc[
-            (e["retailer_id"].astype(int) == int(retailer_id))
-            & (e["date"] >= start_day)
-            & (e["date"] <= end_day)
-        ].copy()
+        dv = st.session_state.get("data_version", 0)
+        e, p = cached_fetch_retailer_bill_data(int(retailer_id), start_day, end_day, dv)
+        e = e.copy() if e is not None else pd.DataFrame()
+        p = p.copy() if p is not None else pd.DataFrame()
 
     if not e.empty:
         e = e.merge(
             categories[["category_id", "name"]], on="category_id", how="left"
         ).rename(columns={"name": "Category"})
         e["Category"] = e["Category"].fillna("").astype(str)
-
-    if USE_SERVER_FILTERS:
-        p = sb_fetch_df(
-            PAYMENTS_FILE,
-            CSV_SCHEMAS[PAYMENTS_FILE],
-            filters=[
-                ("retailer_id", "eq", int(retailer_id)),
-                ("date", "gte", str(start_day)),
-                ("date", "lte", str(end_day)),
-            ],
-        )
-    else:
-        p = payments.copy()
-    if not p.empty:
-        p["date"] = _safe_dt(p["date"]).dt.date
-        p = p.loc[
-            (p["retailer_id"].astype(int) == int(retailer_id))
-            & (p["date"] >= start_day)
-            & (p["date"] <= end_day)
-        ].copy()
 
     pay_by_day = p.groupby("date")["amount"].sum().to_dict() if not p.empty else {}
 
@@ -5827,9 +6019,9 @@ def save_attendance_matrix(year: int, month: int, matrix_df: pd.DataFrame) -> No
     records = []
     for _, row in matrix_df.iterrows():
         wid = int(pd.to_numeric(row.get("worker_id", 0), errors="coerce") or 0)
-        if wid <= 0 and hasattr(row, "name"):
+        if wid <= 0:
             import re
-            m = re.search(r"#(\d+)", str(row.name))
+            m = re.search(r"#(\d+)", str(row.get("ID • कामगार नाव (Worker Name)", "") or getattr(row, "name", "")))
             if m:
                 wid = int(m.group(1))
         if wid <= 0:
@@ -7106,6 +7298,10 @@ div[class*="st-key-subnav_setup_deck"] {
 <!-- Universal Double-Layer Event Interceptor for Grid Header Non-Sorting and Non-Moving -->
 <img src="data:image/svg+xml;utf8,<svg></svg>" style="display:none;" onerror="
 (function() {
+    try {
+        document.documentElement.style.overscrollBehaviorY = 'none';
+        document.body.style.overscrollBehaviorY = 'none';
+    } catch(e) {}
     function lockGridHeaders() {
         var tables = document.querySelectorAll('[data-testid=\'stDataFrame\'], [data-testid=\'stDataEditor\'], [data-testid=\'stDataFrameResizable\']');
         tables.forEach(function(t) {
@@ -9348,7 +9544,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
 
         # Top Tier Super-Headers
         top_ths = [
-            "<th style='position:sticky; left:0; z-index:20; background:#1e293b; color:#94a3b8; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:6px 10px; text-align:left; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:210px;'>CUSTOMER</th>"
+            "<th style='position:-webkit-sticky; position:sticky; left:0; z-index:30; background:#1e293b; color:#94a3b8; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:0.06em; padding:6px 10px; text-align:left; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:220px; max-width:260px; width:230px; white-space:nowrap;'>CUSTOMER</th>"
         ]
         if cat_cols_in_df:
             top_ths.append(
@@ -9379,7 +9575,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                 (pay_cols_in_df[0] if pay_cols_in_df else None),
                 (ledger_cols_in_df[0] if ledger_cols_in_df else None),
             ) else ""
-            sticky_th = "position:sticky; left:0; z-index:20; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:210px;" if is_retailer else ""
+            sticky_th = "position:-webkit-sticky; position:sticky; left:0; z-index:30; background:#243248; box-shadow:2px 0 6px rgba(0,0,0,0.25); min-width:220px; max-width:260px; width:230px; white-space:nowrap;" if is_retailer else ""
             sub_ths.append(
                 f"<th style='background:#243248; color:#ffffff; font-size:11.5px; font-weight:700; padding:6px 8px; text-align:{align}; {border_left} {sticky_th} white-space:nowrap;'>{_clean_title(c)}</th>"
             )
@@ -9439,7 +9635,7 @@ elif menu in ("📝 Daily Entry", "📝 Daily Posting Sheet (Excel)"):
                     and anom_info.get("category_name", "").lower() in c.lower()
                 )
                 cell_extra = "background:#fecaca !important; color:#991b1b !important; font-weight:800 !important; border:1.5px solid #ef4444 !important;" if is_anom_cell else ""
-                sticky_td = f"position:sticky; left:0; z-index:10; background:{bg}; box-shadow:2px 0 6px rgba(0,0,0,0.12); min-width:210px;" if c == "Retailer" else ""
+                sticky_td = f"position:-webkit-sticky; position:sticky; left:0; z-index:20; background:{bg} !important; box-shadow:2px 0 6px rgba(0,0,0,0.15); min-width:220px; max-width:260px; width:230px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" if c == "Retailer" else ""
 
                 cells += (
                     f"<td style='padding:6px 8px; text-align:{align}; font-weight:{fw}; "
@@ -10544,9 +10740,8 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
             matrix_df["ID • कामगार नाव (Worker Name)"] = matrix_df.apply(
                 lambda r: f"#{int(r['worker_id'])} {r['कामगार नाव (Name)']}", axis=1
             )
-            matrix_df = matrix_df.set_index("ID • कामगार नाव (Worker Name)")
 
-            disabled_cols = ["पद (Role)"]
+            disabled_cols = ["ID • कामगार नाव (Worker Name)", "पद (Role)"]
             for d in range(1, days_in_month + 1):
                 if not updated_locks.get(d, True):
                     disabled_cols.append(str(d))
@@ -10554,8 +10749,15 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
             col_configs = {
                 "worker_id": None,
                 "कामगार नाव (Name)": None,
+                "ID • कामगार नाव (Worker Name)": st.column_config.TextColumn(
+                    "कामगार नाव (Worker Name)",
+                    disabled=True,
+                    pinned=True,
+                    width="medium",
+                ),
                 "पद (Role)": st.column_config.TextColumn("पद / काम", disabled=True, width="small"),
             }
+            att_col_order = ["ID • कामगार नाव (Worker Name)", "पद (Role)"] + [str(d) for d in range(1, days_in_month + 1)]
 
             for d in range(1, days_in_month + 1):
                 col_configs[str(d)] = st.column_config.SelectboxColumn(
@@ -10583,9 +10785,10 @@ elif menu == "👷 कामगार हजेरी (Attendance)":
             with st.form(f"att_sheet_form_{sel_year}_{sel_month}", clear_on_submit=False):
                 edited_matrix = st.data_editor(
                     matrix_df,
+                    column_order=att_col_order,
                     disabled=disabled_cols,
                     column_config=col_configs,
-                    hide_index=False,
+                    hide_index=True,
                     use_container_width=True,
                     key=f"att_editor_{sel_year}_{sel_month}",
                 )
@@ -11873,14 +12076,22 @@ elif menu == "💰 Price Management":
     display_df["Retailer (ID & Name)"] = display_df.apply(
         lambda r: f"#{int(r['retailer_id'])} {r['Retailer']}", axis=1
     )
-    display_df = display_df.set_index("Retailer (ID & Name)")
-    display_df = display_df.drop(columns=["retailer_id", "Retailer"])
 
     st.subheader(f"Price Matrix — {selected_route} ({len(retailer_list)} Retailers)")
 
     column_config = {
-        "Route / Zone": st.column_config.TextColumn("Route / Zone", disabled=True),
+        "retailer_id": None,
+        "Retailer": None,
+        "Retailer (ID & Name)": st.column_config.TextColumn(
+            "Retailer (ID & Name)",
+            disabled=True,
+            pinned=True,
+            width="large",
+        ),
+        "Route / Zone": st.column_config.TextColumn("Route / Zone", disabled=True, width="small"),
     }
+    cat_cols_pm_ordered = [c["name"] for _, c in category_list.iterrows()]
+    pm_column_order = ["Retailer (ID & Name)", "Route / Zone"] + cat_cols_pm_ordered
     for _, c in category_list.iterrows():
         column_config[c["name"]] = st.column_config.NumberColumn(
             c["name"], min_value=0.0, step=0.5, format="₹%.2f"
@@ -11911,8 +12122,10 @@ elif menu == "💰 Price Management":
 
         edited_df = st.data_editor(
             display_df,
+            column_order=pm_column_order,
             column_config=column_config,
             use_container_width=True,
+            hide_index=True,
             num_rows="fixed",
             key=f"price_matrix_editor_{eff_date}_{selected_route}",
         )
@@ -11928,13 +12141,27 @@ elif menu == "💰 Price Management":
             save_price_btn = st.form_submit_button("💾 Save Price Changes", type="primary", use_container_width=True)
 
     if save_price_btn:
+        import re
         changed_items = []
-        for i, (_, row) in enumerate(edited_df.iterrows()):
-            rid = int(price_matrix_df.iloc[i]["retailer_id"])
+        for row_idx, row in edited_df.iterrows():
+            rid = None
+            if "retailer_id" in row and pd.notna(row["retailer_id"]):
+                try:
+                    rid = int(row["retailer_id"])
+                except Exception:
+                    pass
+            if rid is None:
+                r_str = str(row.get("Retailer (ID & Name)", "") or row.get("Retailer", "") or row_idx or "")
+                m = re.search(r"#(\d+)", r_str)
+                if m:
+                    rid = int(m.group(1))
+            if rid is None:
+                continue
+
             for _, c in category_list.iterrows():
                 cid = int(c["category_id"])
                 col = c["name"]
-                new_p = round(float(pd.to_numeric(row[col], errors="coerce") or 0.0), 2)
+                new_p = round(float(pd.to_numeric(row.get(col, 0.0), errors="coerce") or 0.0), 2)
                 old_p = round(float(get_price_for_date(rid, cid, eff_date) or c.get("default_price", 0.0) or 0.0), 2)
                 if new_p > 0 and abs(new_p - old_p) > 0.001:
                     changed_items.append({
@@ -12581,9 +12808,15 @@ elif menu == "📒 Distributor Ledger":
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
     preview_disp = preview.copy()
-    if "Date" in preview_disp.columns:
-        preview_disp = preview_disp.set_index("Date")
-    st.dataframe(df_for_display(preview_disp), use_container_width=True)
+    bill_col_config = {
+        "Date": st.column_config.TextColumn("📅 Date", pinned=True, width="medium"),
+    }
+    st.dataframe(
+        df_for_display(preview_disp),
+        column_config=bill_col_config,
+        hide_index=True,
+        use_container_width=True,
+    )
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -12773,9 +13006,15 @@ elif menu == "🧾 Distributor Bill" or (menu == "🧾 Bills & Statements" and b
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
     preview_disp = preview.copy()
-    if "Date" in preview_disp.columns:
-        preview_disp = preview_disp.set_index("Date")
-    st.dataframe(df_for_display(preview_disp), use_container_width=True)
+    bill_col_config = {
+        "Date": st.column_config.TextColumn("📅 Date", pinned=True, width="medium"),
+    }
+    st.dataframe(
+        df_for_display(preview_disp),
+        column_config=bill_col_config,
+        hide_index=True,
+        use_container_width=True,
+    )
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -13103,7 +13342,11 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
     rrow = retailers.loc[retailers["retailer_id"].astype(int) == rid].iloc[0].to_dict()
     rrow["zone"] = _norm_zone(rrow.get("zone", "Default"))
 
-    grid = build_bill_daily_grid(rid, start_day, end_day, cat_names)
+    bill_dv = st.session_state.get("data_version", 0)
+    bill_entries, bill_payments = cached_fetch_retailer_bill_data(rid, start_day, end_day, bill_dv)
+    grid = build_bill_daily_grid(
+        rid, start_day, end_day, cat_names, entries_df=bill_entries, payments_df=bill_payments
+    )
 
     opening_due = retailer_balance_before(rid, start_day)
     closing_due = (
@@ -13116,25 +13359,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
         else float(opening_due)
     )
 
-    if USE_SERVER_FILTERS:
-        p = sb_fetch_df(
-            PAYMENTS_FILE,
-            CSV_SCHEMAS[PAYMENTS_FILE],
-            filters=[
-                ("retailer_id", "eq", int(rid)),
-                ("date", "gte", str(start_day)),
-                ("date", "lte", str(end_day)),
-            ],
-        )
-    else:
-        p = payments.copy()
-        if not p.empty:
-            p["date"] = _safe_dt(p["date"]).dt.date
-            p = p.loc[
-                (p["retailer_id"].astype(int) == rid)
-                & (p["date"] >= start_day)
-                & (p["date"] <= end_day)
-            ].copy()
+    p = bill_payments.copy() if bill_payments is not None and not bill_payments.empty else pd.DataFrame()
 
     if p.empty:
         pay_mode_totals = pd.DataFrame(columns=["Mode", "Total (₹)"])
@@ -13193,9 +13418,15 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
         preview["Total Milk (L)"] = preview["Total Milk (L)"].apply(_disp_2dec_or_dash)
 
     preview_disp = preview.copy()
-    if "Date" in preview_disp.columns:
-        preview_disp = preview_disp.set_index("Date")
-    st.dataframe(df_for_display(preview_disp), use_container_width=True)
+    bill_col_config = {
+        "Date": st.column_config.TextColumn("📅 Date", pinned=True, width="medium"),
+    }
+    st.dataframe(
+        df_for_display(preview_disp),
+        column_config=bill_col_config,
+        hide_index=True,
+        use_container_width=True,
+    )
 
     # ---------------- GRAND TOTALS (Categories + Payments) ----------------
     # Computed from the in-memory preview derived from current draft for (date, zone).
@@ -13473,37 +13704,14 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
             col_hdr = f"CID:{cid_val} — {cname_val}" if cname_val else f"CID:{cid_val}"
             editor_cat_cols.append({"col": col_hdr, "category_id": cid_val, "name": cname_val})
 
-        # Fetch existing entries & payments for this retailer in ed_start_day to ed_end_day
-        if USE_SERVER_FILTERS:
-            r_entries = sb_fetch_df(
-                ENTRIES_FILE,
-                CSV_SCHEMAS[ENTRIES_FILE],
-                filters=[
-                    ("retailer_id", "eq", int(rid)),
-                    ("date", "gte", str(ed_start_day)),
-                    ("date", "lte", str(ed_end_day)),
-                ],
-            )
-            r_payments = sb_fetch_df(
-                PAYMENTS_FILE,
-                CSV_SCHEMAS[PAYMENTS_FILE],
-                filters=[
-                    ("retailer_id", "eq", int(rid)),
-                    ("date", "gte", str(ed_start_day)),
-                    ("date", "lte", str(ed_end_day)),
-                ],
-            )
+        # Fetch existing entries & payments for this retailer in ed_start_day to ed_end_day (cached & fast)
+        if ed_start_day == start_day and ed_end_day == end_day and bill_entries is not None and bill_payments is not None:
+            r_entries = bill_entries.copy()
+            r_payments = bill_payments.copy()
         else:
-            r_entries = entries.loc[
-                (entries["retailer_id"].astype(int) == int(rid))
-                & (entries["date"] >= ed_start_day)
-                & (entries["date"] <= ed_end_day)
-            ].copy() if not entries.empty else pd.DataFrame()
-            r_payments = payments.loc[
-                (payments["retailer_id"].astype(int) == int(rid))
-                & (payments["date"] >= ed_start_day)
-                & (payments["date"] <= ed_end_day)
-            ].copy() if not payments.empty else pd.DataFrame()
+            r_entries, r_payments = cached_fetch_retailer_bill_data(rid, ed_start_day, ed_end_day, bill_dv)
+            r_entries = r_entries.copy() if r_entries is not None else pd.DataFrame()
+            r_payments = r_payments.copy() if r_payments is not None else pd.DataFrame()
 
         r_day_entries_map = {}
         if r_entries is not None and not r_entries.empty:
@@ -13524,11 +13732,14 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
         ed_days_range = pd.date_range(start=ed_start_day, end=ed_end_day, freq="D").date
 
         ed_grid_rows = []
+        date_display_to_iso = {}
         for single_d in ed_days_range:
             d_str = str(single_d)
+            disp_d = single_d.strftime("%d/%m/%Y")
+            date_display_to_iso[disp_d] = d_str
             row_data = {
-                "Date": single_d.strftime("%Y-%m-%d"),
-                "Display Date": single_d.strftime("%d/%m/%Y"),
+                "Date": d_str,
+                "Display Date": disp_d,
                 "ID": int(rid),
                 "Retailer": str(retailer_name),
             }
@@ -13541,12 +13752,10 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
             ed_grid_rows.append(row_data)
 
         single_r_edit_df = pd.DataFrame(ed_grid_rows)
-        single_r_edit_df["📅 Date"] = single_r_edit_df["Display Date"]
-        single_r_edit_df = single_r_edit_df.set_index("📅 Date")
 
         col_config = {
             "Date": None,
-            "Display Date": None,
+            "Display Date": st.column_config.TextColumn("📅 Date", disabled=True, pinned=True, width="medium"),
             "ID": None,
             "Retailer": None,
         }
@@ -13569,7 +13778,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
         cat_col_names_ordered = [cm["col"] for cm in editor_cat_cols]
         pay_col_names_ordered = [f"{m_name} ₹" for m_name in PAYMENT_MODES]
-        display_col_order = cat_col_names_ordered + pay_col_names_ordered
+        display_col_order = ["Display Date"] + cat_col_names_ordered + pay_col_names_ordered
         full_col_order = ["Date", "Display Date", "ID", "Retailer"] + cat_col_names_ordered + pay_col_names_ordered
 
         single_r_edit_df = single_r_edit_df[[c for c in full_col_order if c in single_r_edit_df.columns]]
@@ -13581,6 +13790,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                 column_order=display_col_order,
                 column_config=col_config,
                 use_container_width=True,
+                hide_index=True,
                 num_rows="fixed",
                 key=ed_key,
             )
@@ -13634,11 +13844,15 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
                 try:
                     for idx_val, day_row in changed_rows:
-                        orig_match = single_r_edit_df.loc[idx_val] if idx_val in single_r_edit_df.index else None
-                        d_val_str = str(day_row.get("Date", "") or (orig_match.get("Date", "") if orig_match is not None else ""))
+                        d_val_str = str(day_row.get("Date", "") or "")
+                        if not d_val_str and isinstance(idx_val, int) and idx_val < len(single_r_edit_df):
+                            d_val_str = str(single_r_edit_df.iloc[idx_val].get("Date", ""))
+                        if not d_val_str:
+                            disp_d = str(day_row.get("Display Date", "") or idx_val)
+                            d_val_str = date_display_to_iso.get(disp_d, "")
                         if not d_val_str:
                             d_val_str = str(idx_val)
-                        d_val_date = pd.to_datetime(d_val_str).date()
+                        d_val_date = pd.to_datetime(d_val_str, dayfirst=True).date()
                         day_df = pd.DataFrame([day_row])
                         day_df["Date"] = d_val_str
                         day_df["ID"] = int(rid)
@@ -13650,6 +13864,7 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                             edited_df=day_df,
                             cat_cols=editor_cat_cols,
                             sb=get_sb(),
+                            invalidate_cache=False,
                         )
                         total_e_upd += diff_res["entries_updated"]
                         total_e_ins += diff_res["entries_inserted"]
@@ -13732,10 +13947,14 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
         else:
             rate_days_range = pd.date_range(start=rate_start_day, end=rate_end_day, freq="D").date
             rate_grid_rows = []
+            rate_date_display_to_iso = {}
             for single_d in rate_days_range:
+                d_iso_str = single_d.strftime("%Y-%m-%d")
+                d_disp_str = single_d.strftime("%d/%m/%Y")
+                rate_date_display_to_iso[d_disp_str] = d_iso_str
                 row_r = {
-                    "Date": single_d.strftime("%Y-%m-%d"),
-                    "Display Date": single_d.strftime("%d/%m/%Y"),
+                    "Date": d_iso_str,
+                    "Display Date": d_disp_str,
                 }
                 for _, c in category_list_bill.iterrows():
                     cid = int(c["category_id"])
@@ -13747,14 +13966,13 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                 rate_grid_rows.append(row_r)
 
             single_rate_matrix_df = pd.DataFrame(rate_grid_rows)
-            single_rate_matrix_df["📅 Date"] = single_rate_matrix_df["Display Date"]
-            single_rate_matrix_df = single_rate_matrix_df.set_index("📅 Date")
 
             rate_col_names_ordered = [str(c["name"]) for _, c in category_list_bill.iterrows()]
             single_price_col_config = {
                 "Date": None,
-                "Display Date": None,
+                "Display Date": st.column_config.TextColumn("📅 Date", disabled=True, pinned=True, width="medium"),
             }
+            rate_display_order = ["Display Date"] + rate_col_names_ordered
             for col_cname in rate_col_names_ordered:
                 single_price_col_config[col_cname] = st.column_config.NumberColumn(
                     col_cname, min_value=0.0, step=0.5, format="₹%.2f"
@@ -13785,9 +14003,10 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
                 edited_rate_matrix_df = st.data_editor(
                     single_rate_matrix_df,
-                    column_order=rate_col_names_ordered,
+                    column_order=rate_display_order,
                     column_config=single_price_col_config,
                     use_container_width=True,
+                    hide_index=True,
                     num_rows="fixed",
                     key=f"single_r_price_matrix_editor_{rid}_{rate_start_day}_{rate_end_day}_{st.session_state.get('data_version', 0)}",
                 )
@@ -13809,20 +14028,21 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
 
             if save_single_price_btn and edited_rate_matrix_df is not None:
                 changed_by_date = {}
-                for idx_date_str, row in edited_rate_matrix_df.iterrows():
-                    orig_row = single_rate_matrix_df.loc[idx_date_str] if idx_date_str in single_rate_matrix_df.index else None
-                    if orig_row is None:
-                        continue
-                    d_iso = str(orig_row.get("Date", "") or row.get("Date", ""))
+                for idx, row in edited_rate_matrix_df.iterrows():
+                    orig_row = single_rate_matrix_df.iloc[idx] if (isinstance(idx, int) and idx < len(single_rate_matrix_df)) else None
+                    d_iso = str(row.get("Date", "") or (orig_row.get("Date", "") if orig_row is not None else ""))
+                    if not d_iso:
+                        disp_d = str(row.get("Display Date", "") or (orig_row.get("Display Date", "") if orig_row is not None else ""))
+                        d_iso = rate_date_display_to_iso.get(disp_d, "")
                     if not d_iso:
                         continue
-                    d_obj = pd.to_datetime(d_iso).date()
+                    d_obj = pd.to_datetime(d_iso, dayfirst=True).date()
                     
                     for _, c in category_list_bill.iterrows():
                         cid = int(c["category_id"])
                         col = str(c["name"])
                         new_p = round(float(pd.to_numeric(row.get(col, 0.0), errors="coerce") or 0.0), 2)
-                        old_p = round(float(pd.to_numeric(orig_row.get(col, 0.0), errors="coerce") or 0.0), 2)
+                        old_p = round(float(pd.to_numeric(orig_row.get(col, 0.0) if isinstance(orig_row, pd.Series) else 0.0, errors="coerce") or 0.0), 2)
                         if new_p > 0 and abs(new_p - old_p) > 0.001:
                             if d_obj not in changed_by_date:
                                 changed_by_date[d_obj] = []
@@ -13852,14 +14072,12 @@ elif menu == "🧾 Retailers Bill" or (menu == "🧾 Bills & Statements" and bil
                     total_entries_upd = 0
                     total_dates_changed = len(changed_by_date)
                     try:
-                        for ch_date, ch_items in sorted(changed_by_date.items()):
-                            res = save_retailer_rate_changes(
-                                retailer_id=rid,
-                                eff_date=ch_date,
-                                changed_items=ch_items,
-                                apply_to_future=apply_to_future,
-                            )
-                            total_entries_upd += res.get("entries_updated", 0)
+                        res = save_retailer_rate_changes_batch(
+                            retailer_id=rid,
+                            changed_by_date=changed_by_date,
+                            apply_to_future=apply_to_future,
+                        )
+                        total_entries_upd = res.get("entries_updated", 0)
                     finally:
                         st.session_state["is_saving_active"] = False
                         save_rate_overlay.empty()
